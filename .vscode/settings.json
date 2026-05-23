@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cmd /c \"cd /d C:\\\\Users\\\\JAL\\\\Documents\\\\Projetos\\\\trall_zero\\\\trallzero && flutter analyze\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

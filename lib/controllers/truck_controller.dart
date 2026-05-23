@@ -4,7 +4,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:geocoding/geocoding.dart';
 import '../models/marker_model.dart';
+import '../models/road_analysis.dart';
+import '../models/truck_profile.dart';
 import '../services/database_service.dart';
+import '../services/road_analysis_service.dart';
+import '../services/truck_profile_service.dart';
 
 class TruckController extends ChangeNotifier {
   LatLng? _destination;
@@ -27,9 +31,13 @@ class TruckController extends ChangeNotifier {
   }
   bool _isRouting = false;
   bool _isNavigating = false; // Estado de navegação ativa
-  
+
   double _distance = 0;
   double _duration = 0;
+
+  List<RoadSegmentAnalysis> _routeAnalysisSegments = [];
+  List<RoadAnalysisFinding> _routeAnalysisFindings = [];
+  RoadHazardLevel _routeRiskLevel = RoadHazardLevel.safe;
 
   List<String> _suggestions = [];
 
@@ -39,6 +47,10 @@ class TruckController extends ChangeNotifier {
   bool get isRouting => _isRouting;
   bool get isNavigating => _isNavigating;
   List<String> get suggestions => _suggestions;
+  List<RoadSegmentAnalysis> get routeAnalysisSegments => _routeAnalysisSegments;
+  List<RoadAnalysisFinding> get routeAnalysisFindings => _routeAnalysisFindings;
+  RoadHazardLevel get routeRiskLevel => _routeRiskLevel;
+  TruckProfile get truckProfile => TruckProfileService.instance.currentProfile;
   
   String get formattedDistance {
     if (_distance >= 1000) return '${(_distance / 1000).toStringAsFixed(1)} km';
@@ -160,6 +172,7 @@ class TruckController extends ChangeNotifier {
         _duration = route['duration'].toDouble();
         final geometry = route['geometry']['coordinates'] as List;
         _routePoints = geometry.map((coord) => LatLng(coord[1], coord[0])).toList();
+        await _computeRouteAnalysis();
       }
     } catch (e) {
       debugPrint('Erro ao buscar rota: $e');
@@ -172,10 +185,46 @@ class TruckController extends ChangeNotifier {
   void clearRoute() {
     _destination = null;
     _routePoints = [];
+    _routeAnalysisSegments = [];
+    _routeAnalysisFindings = [];
+    _routeRiskLevel = RoadHazardLevel.safe;
     _distance = 0;
     _duration = 0;
     _suggestions = [];
     _isNavigating = false;
     notifyListeners();
+  }
+
+  Future<void> setTruckProfile(TruckProfile profile) async {
+    TruckProfileService.instance.selectProfile(profile);
+    notifyListeners();
+    if (_routePoints.isNotEmpty) {
+      await _computeRouteAnalysis();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _computeRouteAnalysis() async {
+    if (_routePoints.isEmpty) {
+      _routeAnalysisSegments = [];
+      _routeAnalysisFindings = [];
+      _routeRiskLevel = RoadHazardLevel.safe;
+      return;
+    }
+
+    _routeAnalysisSegments = await RoadAnalysisService.instance.analyzeSlopeSegments(
+      _routePoints,
+      truckProfile,
+    );
+
+    _routeAnalysisFindings = await RoadAnalysisService.instance.analyzeOsmRestrictions(
+      _routePoints,
+      truckProfile,
+    );
+
+    _routeRiskLevel = RoadAnalysisService.instance.getMaxSeverity(
+      _routeAnalysisSegments,
+      _routeAnalysisFindings,
+    );
   }
 }
