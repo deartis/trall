@@ -11,25 +11,26 @@ import '../widgets/navigation_marker.dart';
 import '../controllers/truck_controller.dart';
 import '../map_layers/road_analysis_layer.dart';
 import '../models/marker_model.dart';
-import '../models/road_analysis.dart';
 import '../models/truck_profile.dart';
+import '../widgets/map_icon_button.dart';
+import '../widgets/navigation_panel.dart';
 
 // ============================================================
-// COMO FUNCIONA A ROTAÃ‡ÃƒO:
+// COMO FUNCIONA A ROTAÇÃO:
 //
-//   1. O MAPA rotaciona para que a direÃ§Ã£o do aparelho fique
-//      apontando para o TOPO da tela (idÃªntico ao Waze).
+//   1. O MAPA rotaciona para que a direção do aparelho fique
+//      apontando para o TOPO da tela (idêntico ao Waze).
 //
 //   2. A SETA (NavigationMarker) fica sempre fixa apontando
 //      para o TOPO (rotate: true no Marker).
 //
 //   3. Fonte do heading:
-//      - BÃšSSOLA: fonte principal. Funciona parado.
-//      - GPS: fallback quando sem bÃºssola ou em movimento >1.5m/s.
+//      - BÚSSOLA: fonte principal. Funciona parado.
+//      - GPS: fallback quando sem bússola ou em movimento >1.5m/s.
 //
 //   4. Follow mode:
-//      - true  â†’ cÃ¢mera segue o veÃ­culo e o mapa rotaciona.
-//      - false â†’ cÃ¢mera livre (usuÃ¡rio arrastou o mapa).
+//      - true  → câmera segue o veículo e o mapa rotaciona.
+//      - false → câmera livre (usuário arrastou o mapa).
 // ============================================================
 
 class MapScreen extends StatefulWidget {
@@ -66,24 +67,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _lastKnownSpeed = 0;
   Timer? _compassCheckTimer;
 
-  // --- DetecÃ§Ã£o de bÃºssola dummy (ex: Moto G30) ---
+  // --- Detecção de bússola dummy (ex: Moto G30) ---
   int _compassEventCount = 0;
   double? _firstCompassValue;
   double? _lastCompassRawValue;
   bool _isCompassDummy = false;
   bool _compassAvailable = false;
 
-  // --- Follow mode ---
+  // --- Follow mode e FullScreen ---
   bool _isFollowMode = true;
+  bool _isFullScreen = false;
 
   // --- Recálculo de Rota Automático (Rerouting) ---
   int _offRouteCount = 0;
   bool _isRecalculating = false;
   bool _showReroutingBanner = false;
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
   //  CICLO DE VIDA
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -149,9 +151,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  LOCALIZAÃ‡ÃƒO (GPS)
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
+  //  LOCALIZAÇÃO (GPS)
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _initLocation() async {
     final hasPermission = await LocationService.handlePermission();
@@ -184,7 +186,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      debugPrint('[GPS] Erro na posiÃ§Ã£o inicial: $e');
+      debugPrint('[GPS] Erro na posição inicial: $e');
     }
   }
 
@@ -212,6 +214,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         if (minDist < 30) {
           newPos = closest;
           _offRouteCount = 0;
+          truckController.updateCurrentStep(newPos); // avança manobra
         } else if (minDist >= 40) {
           _offRouteCount++;
           if (_offRouteCount >= 3 && !_isRecalculating) {
@@ -226,8 +229,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final now = DateTime.now();
       if (_lastGpsUpdateTime != null) {
         final elapsed = now.difference(_lastGpsUpdateTime!);
-        // Se o tempo decorrido for plausível (entre 300ms e 2000ms),
-        // configuramos a animação para cerca de 85% do tempo real de update para evitar lag
         if (elapsed.inMilliseconds >= 300 && elapsed.inMilliseconds <= 2000) {
           _animationDuration = Duration(
             milliseconds: (elapsed.inMilliseconds * 0.85).round(),
@@ -250,7 +251,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           gpsHeading != null && (speed > 1.5 || _isCompassDummy);
 
       if (useGpsHeading) {
-        // Fator alto (0.95): reage rápido ao GPS em movimento, sem lag acumulado
         _heading = _smoothAngle(_heading, gpsHeading, factor: 0.95);
         _headingNotifier.value = _heading;
       }
@@ -283,7 +283,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           targetCenter = newPos;
         }
 
-        // Animação da câmera com curva linear para movimento uniforme simulando o deslocamento
         _animateMapCamera(
           targetCenter,
           -_heading,
@@ -291,7 +290,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           customCurve: Curves.linear,
         );
       } else {
-        // Se estiver com câmera livre (modo follow desligado), ainda assim animamos o caminhão suavemente
         _latLngTween = null;
         _rotationTween = null;
         _zoomTween = null;
@@ -327,16 +325,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  BÃšSSOLA
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
+  //  BÚSSOLA
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _startCompassUpdates() {
     _compassStream?.cancel();
     final events = FlutterCompass.events;
 
     if (events == null) {
-      debugPrint('[Sensor] BÃºssola nÃ£o encontrada no hardware.');
+      debugPrint('[Sensor] Bússola não encontrada no hardware.');
       setState(() {
         _isCompassDummy = true;
         _compassAvailable = false;
@@ -346,9 +344,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     _compassCheckTimer = Timer(const Duration(seconds: 4), () {
       if ((!_compassAvailable || _isCompassDummy) && mounted) {
-        debugPrint(
-          '[Sensor] BÃºssola nÃ£o funcional â€” usando GPS como fallback.',
-        );
+        debugPrint('[Sensor] Bússola não funcional – usando GPS como fallback.');
       }
     });
 
@@ -356,7 +352,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final h = event.heading;
       if (!mounted || h == null || h.isNaN) return;
 
-      // DetecÃ§Ã£o de sensor dummy (valor constante apÃ³s 15 eventos)
+      // Detecção de sensor dummy (valor constante após 15 eventos)
       _compassEventCount++;
       _firstCompassValue ??= h;
       if (!_isCompassDummy && _compassEventCount > 15) {
@@ -366,7 +362,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             _compassAvailable = false;
           });
           _compassCheckTimer?.cancel();
-          debugPrint('[Sensor] BÃºssola DUMMY detectada (valor constante).');
+          debugPrint('[Sensor] Bússola DUMMY detectada (valor constante).');
           return;
         }
       }
@@ -378,24 +374,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _compassCheckTimer?.cancel();
       }
 
-      // BÃºssola sÃ³ controla heading quando parado (GPS assume em movimento)
+      // Bússola só controla heading quando parado (GPS assume em movimento)
       if (_lastKnownSpeed > 1.5) return;
- 
-      // Filtro de histerese (deadband): se o aparelho estÃ¡ parado, ignoramos
-      // variaÃ§Ãµes menores que 1.5Â° para eliminar ruÃ­dos e evitar que o mapa gire sozinho.
+
+      // Filtro de histerese (deadband): ignora variações menores que 1.5°
       if (_lastCompassRawValue != null) {
         final double rawDiff = ((h - _lastCompassRawValue! + 540) % 360) - 180;
         if (rawDiff.abs() < 1.5) return;
       }
       _lastCompassRawValue = h;
- 
-      // Fator alto (0.85): resposta quase imediata, filtra apenas tremores de mÃ£o
+
       _heading = _smoothAngle(_heading, h, factor: 0.85);
       _headingNotifier.value = _heading;
 
       if (!_isFollowMode) return;
 
-      // Se animaÃ§Ã£o estÃ¡ rodando, ela aplica o heading atualizado no prÃ³ximo tick
       if (_cameraAnimationController == null ||
           !_cameraAnimationController!.isAnimating) {
         try {
@@ -403,15 +396,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           final zoom = _mapController.camera.zoom;
           _mapController.moveAndRotate(center, zoom, -_heading);
         } catch (e) {
-          debugPrint('[Compass] MapController nÃ£o pronto: $e');
+          debugPrint('[Compass] MapController não pronto: $e');
         }
       }
     });
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  CÃ‚MERA
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
+  //  CÂMERA
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _moveNavigationCamera(LatLng position, {bool instant = false}) {
     final double zoom;
@@ -475,14 +468,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       destCenter,
     );
 
-    // Threshold aumentado: 1.5° ignora micro-tremores mas deixa rotações reais passarem
     if (distance < 0.5 &&
         (destRotation - startRotation).abs() < 1.5 &&
         (destZoom - startZoom).abs() < 0.05) {
       return;
     }
 
-    // Salto grande (ex: primeiro fix GPS): move instantaneamente, sem efeito slingshot
     if (distance > 500) {
       _cameraAnimationController?.stop();
       _mapController.moveAndRotate(destCenter, destZoom, destRotation);
@@ -494,7 +485,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       return;
     }
 
-    // Resolve wraparound 360° para interpolação linear sem giros bruscos
     final double diff = destRotation - startRotation;
     final double shortestDiff = ((diff + 180) % 360) - 180;
     final double adjustedDestRotation = startRotation + shortestDiff;
@@ -506,7 +496,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
     _zoomTween = Tween<double>(begin: startZoom, end: destZoom);
 
-    // Garante que o caminhão também faça a interpolação em sincronia com a câmera
     if (_currentPosition != null) {
       _vehicleLatLngTween = LatLngTween(
         begin: _animatedCurrentPosition ?? _currentPosition!,
@@ -524,9 +513,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _cameraAnimationController?.forward();
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  HELPERS MATEMÃTICOS
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
+  //  HELPERS MATEMÁTICOS
+  // ─────────────────────────────────────────────────────────────────────────
 
   double _smoothAngle(double current, double target, {required double factor}) {
     final delta = ((target - current + 540) % 360) - 180;
@@ -567,9 +556,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   // _snapToRoute foi unificado diretamente no fluxo de atualizações do GPS em _startLocationUpdates
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
   //  BUSCA
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _onSearchChanged() {
     if (_debounce?.isActive ?? false) _debounce?.cancel();
@@ -584,9 +573,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     });
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
   //  MARCADORES COLABORATIVOS
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _showTruckProfileSheet() {
     showModalBottomSheet<void>(
@@ -629,7 +618,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                   subtitle: Text(
                     '${profile.maxWeightKg.toInt()} kg • ${profile.maxHeightMeters} m • ${profile.axles} eixos',
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.white38,
                       fontSize: 12,
                     ),
@@ -761,7 +750,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            // Ãcone + Tipo
+            // Ícone + Tipo
             Row(
               children: [
                 Container(
@@ -803,7 +792,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ],
             ),
             const SizedBox(height: 28),
-            // BotÃ£o deletar
+            // Botão deletar
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -856,14 +845,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   String _markerLabel(MarkerType t) => switch (t) {
     MarkerType.loading => 'Carga',
     MarkerType.unloading => 'Descarga',
-    MarkerType.restriction => 'RestriÃ§Ã£o',
-    MarkerType.weighStation => 'BalanÃ§a',
-    MarkerType.parking => 'PÃ¡tio',
+    MarkerType.restriction => 'Restrição',
+    MarkerType.weighStation => 'Balança',
+    MarkerType.parking => 'Pátio',
   };
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
   //  BUILD
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -873,7 +862,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // â”€â”€ MAPA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ── MAPA ──────────────────────────────────────────────────────────
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -883,18 +872,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 flags: InteractiveFlag.all,
               ),
               onMapEvent: (event) {
-                // SÃ³ desativa follow quando o USUÃRIO arrasta â€” nÃ£o eventos programÃ¡ticos
                 if (_isFollowMode && event.source == MapEventSource.dragStart) {
                   setState(() => _isFollowMode = false);
                   _cameraAnimationController?.stop();
                 }
               },
-              onTap: (_, point) {
-                if (_currentPosition != null) {
-                  tc.setDestination(point, _currentPosition!);
-                }
-                FocusScope.of(context).unfocus();
-              },
+              onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
               onLongPress: (_, point) => _showAddMarkerDialog(point),
             ),
             children: [
@@ -906,22 +889,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
               if (tc.routePoints.isNotEmpty)
                 PolylineLayer(
-                  polylines: tc.routeAnalysisSegments.isNotEmpty
-                      ? buildRoadAnalysisPolylines(tc.routeAnalysisSegments)
-                      : [
-                          // Sombra da rota
-                          Polyline(
-                            points: tc.routePoints,
-                            color: Colors.blueAccent.withValues(alpha: 0.25),
-                            strokeWidth: 10,
-                          ),
-                          // Rota principal
-                          Polyline(
-                            points: tc.routePoints,
-                            color: Colors.blueAccent,
-                            strokeWidth: 4.5,
-                          ),
-                        ],
+                  polylines: [
+                    ...tc.availableRoutes.asMap().entries
+                        .where((entry) => entry.key != tc.selectedRouteIndex)
+                        .map((entry) {
+                      final route = entry.value;
+                      return Polyline(
+                        points: route.points,
+                        color: Colors.white.withValues(alpha: 0.18),
+                        strokeWidth: 5.0,
+                      );
+                    }),
+                    ...(tc.routeAnalysisSegments.isNotEmpty
+                        ? buildRoadAnalysisPolylines(tc.routeAnalysisSegments)
+                        : [
+                            Polyline(
+                              points: tc.routePoints,
+                              color: Colors.blueAccent,
+                              strokeWidth: 6.0,
+                            ),
+                          ]),
+                  ],
                 ),
               MarkerLayer(
                 markers: [
@@ -945,7 +933,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         size: 35,
                       ),
                     ),
-              ...tc.customMarkers.map(
+                  ...tc.customMarkers.map(
                     (m) => Marker(
                       point: m.position,
                       width: 44,
@@ -975,13 +963,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ],
           ),
 
-          // â”€â”€ BARRA DE BUSCA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
+          // ── BARRA DE BUSCA ────────────────────────────────────────────────
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic,
+            top: _isFullScreen ? -200 : MediaQuery.of(context).padding.top + 12,
             left: 16,
             right: 16,
-            child: Column(
-              children: [
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 250),
+              opacity: _isFullScreen ? 0.0 : 1.0,
+              child: Column(
+                children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
@@ -1071,7 +1064,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       padding: EdgeInsets.zero,
                       shrinkWrap: true,
                       itemCount: tc.suggestions.length,
-                      separatorBuilder: (_, _) => Divider(
+                      separatorBuilder: (context, index) => Divider(
                         color: Colors.white.withValues(alpha: 0.06),
                         height: 1,
                         indent: 44,
@@ -1112,8 +1105,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
+        ),
 
-          // ── BANNER DE RECÁLCULO DE ROTA ──────────────────
+        // ── BANNER DE RECÁLCULO DE ROTA ───────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 80,
             left: 16,
@@ -1178,357 +1172,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           ),
 
-          // ── PAINEL DE ROTA ──────────────────────────────
-          Positioned(
-            left: 16,
-            right: 80,
-            bottom: 32,
-            child: AnimatedSlide(
-              offset: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
-                  ? Offset.zero
-                  : const Offset(0, 1.5),
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOutCubic,
-              child: AnimatedOpacity(
-                opacity: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty) ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 220),
-                child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      const Color(0xFF1A1D26).withValues(alpha: 0.97),
-                      const Color(0xFF0D0F14).withValues(alpha: 0.97),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: tc.isNavigating
-                        ? const Color(0xFF34C759).withValues(alpha: 0.4)
-                        : Colors.blueAccent.withValues(alpha: 0.3),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color:
-                          (tc.isNavigating
-                                  ? const Color(0xFF34C759)
-                                  : Colors.blueAccent)
-                              .withValues(alpha: 0.12),
-                      blurRadius: 24,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 4),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.timer_rounded,
-                          color: tc.isNavigating
-                              ? const Color(0xFF34C759)
-                              : Colors.blueAccent,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              tc.formattedDuration,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                            Text(
-                              tc.formattedDistance,
-                              style: TextStyle(
-                                color: tc.isNavigating
-                                    ? const Color(0xFF34C759)
-                                    : Colors.blueAccent,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 10,
-                      runSpacing: 8,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: tc.routeRiskLevel == RoadHazardLevel.safe
-                                ? const Color(0xFF0A3E12)
-                                : tc.routeRiskLevel == RoadHazardLevel.attention
-                                    ? const Color(0xFF4A4300)
-                                    : tc.routeRiskLevel == RoadHazardLevel.heavy
-                                        ? const Color(0xFF6B2F04)
-                                        : const Color(0xFF4A0503),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                tc.routeRiskLevel == RoadHazardLevel.safe
-                                    ? Icons.check_circle_rounded
-                                    : tc.routeRiskLevel == RoadHazardLevel.attention
-                                        ? Icons.report_gmailerrorred_rounded
-                                        : tc.routeRiskLevel == RoadHazardLevel.heavy
-                                            ? Icons.dangerous_rounded
-                                            : Icons.block_rounded,
-                                size: 16,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                tc.routeRiskLevel.label,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 140),
-                          child: Text(
-                            'Perfil: ${tc.truckProfile.label}',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        InkWell(
-                          onTap: _showTruckProfileSheet,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF111318).withValues(alpha: 0.95),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.swap_horiz_rounded, color: Colors.white70, size: 16),
-                                SizedBox(width: 6),
-                                Text(
-                                  'Perfil',
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (tc.routeAnalysisFindings.isNotEmpty) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF111318).withValues(alpha: 0.95),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.06),
-                          ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.warning_rounded, color: Color(0xFFFFD60A), size: 20),
-                            const SizedBox(width: 10),
-                            Flexible(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    tc.routeAnalysisFindings.first.title,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    tc.routeAnalysisFindings.first.detail,
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.72),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    // BotÃ£o GO/PARAR â€” 72Ã—52 para uso com luva
-                    GestureDetector(
-                      onTap: () {
-                        tc.toggleNavigation();
-                        if (tc.isNavigating) {
-                          setState(() {
-                            _isFollowMode = true;
-                            _offRouteCount = 0;
-                            _isRecalculating = false;
-                            _showReroutingBanner = false;
-                          });
-                          if (_currentPosition != null) {
-                            _moveNavigationCamera(_currentPosition!);
-                          }
-                        } else {
-                          _mapController.rotate(0);
-                        }
-                      },
-                      child: Container(
-                        width: 72,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: tc.isNavigating
-                              ? const Color(0xFFFF3B30)
-                              : Colors.blueAccent,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  (tc.isNavigating
-                                          ? const Color(0xFFFF3B30)
-                                          : Colors.blueAccent)
-                                      .withValues(alpha: 0.4),
-                              blurRadius: 12,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: Text(
-                            tc.isNavigating ? 'PARAR' : 'GO',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+          // ── PAINEL DE NAVEGAÇÃO ───────────────────────────────────────────
+          if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: NavigationPanel(
+                heading: _heading,
+                speed: _lastKnownSpeed,
+                onProfileTap: _showTruckProfileSheet,
+                onRoutesTap: tc.cycleRoute,
+                onGo: () {
+                  tc.toggleNavigation();
+                  if (tc.isNavigating) {
+                    setState(() {
+                      _isFollowMode = true;
+                      _offRouteCount = 0;
+                      _isRecalculating = false;
+                      _showReroutingBanner = false;
+                    });
+                    if (_currentPosition != null) {
+                      _moveNavigationCamera(_currentPosition!);
+                    }
+                  } else {
+                    _mapController.rotate(0);
+                  }
+                },
+                onStop: () {
+                  tc.toggleNavigation();
+                  _mapController.rotate(0);
+                },
               ),
             ),
-          ),
-          ),
 
-
-          // â”€â”€ VELOCÃMETRO (durante navegaÃ§Ã£o ativa) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-          Positioned(
-            left: 16,
-            bottom: 136, // acima do painel de rota (32 + 80 + 24)
-            child: AnimatedSlide(
-              offset: (tc.isNavigating && _lastKnownSpeed > 0)
-                  ? Offset.zero
-                  : const Offset(-1.5, 0),
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutCubic,
-              child: AnimatedOpacity(
-                opacity: (tc.isNavigating && _lastKnownSpeed > 0) ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF111318).withValues(alpha: 0.95),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${(_lastKnownSpeed * 3.6).round()}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -1,
-                          height: 1,
-                        ),
-                      ),
-                      const Text(
-                        'km/h',
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // â”€â”€ BOTÃ•ES LATERAIS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ── BOTÕES LATERAIS ───────────────────────────────────────────────
           Positioned(
             right: 16,
             bottom: 32,
             child: Column(
               children: [
-                _MapIconButton(
+                MapIconButton(
                   icon: Icons.add_rounded,
                   onPressed: () => _mapController.move(
                     _mapController.camera.center,
@@ -1536,7 +1220,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                 ),
                 const SizedBox(height: 8),
-                _MapIconButton(
+                MapIconButton(
                   icon: Icons.remove_rounded,
                   onPressed: () => _mapController.move(
                     _mapController.camera.center,
@@ -1544,7 +1228,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _MapIconButton(
+                MapIconButton(
+                  icon: _isFullScreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                  onPressed: () => setState(() => _isFullScreen = !_isFullScreen),
+                ),
+                const SizedBox(height: 16),
+                MapIconButton(
                   icon: _isFollowMode
                       ? Icons.navigation_rounded
                       : Icons.my_location_rounded,
@@ -1570,7 +1259,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           ),
 
-          // â”€â”€ LOADING ROTA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+          // ── LOADING ROTA ──────────────────────────────────────────────────
           if (tc.isRouting)
             Container(
               color: Colors.black.withValues(alpha: 0.3),
@@ -1587,67 +1276,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-//  WIDGETS AUXILIARES
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/// BotÃ£o do mapa â€” 52Ã—52, tÃ¡til para uso com luva
-class _MapIconButton extends StatelessWidget {
-  const _MapIconButton({
-    required this.icon,
-    required this.onPressed,
-    this.isPrimary = false,
-  });
-
-  final IconData icon;
-  final VoidCallback onPressed;
-  final bool isPrimary;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: isPrimary
-                ? Colors.blueAccent
-                : const Color(0xFF111318).withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isPrimary
-                  ? Colors.blueAccent.withValues(alpha: 0.6)
-                  : Colors.white.withValues(alpha: 0.08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-              if (isPrimary)
-                BoxShadow(
-                  color: Colors.blueAccent.withValues(alpha: 0.3),
-                  blurRadius: 16,
-                  spreadRadius: 2,
-                ),
-            ],
-          ),
-          child: Icon(icon, color: Colors.white, size: 22),
-        ),
-      ),
-    );
-  }
-}
-
-
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 //  TWEEN DE COORDENADAS
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 
 class LatLngTween extends Tween<LatLng> {
   LatLngTween({super.begin, super.end});
