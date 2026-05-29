@@ -342,10 +342,6 @@ class TruckController extends ChangeNotifier {
           final geometry = routeData['geometry']['coordinates'] as List;
           final points = geometry.map((coord) => LatLng(coord[1], coord[0])).toList();
           
-          final slopeSegments = await RoadAnalysisService.instance.analyzeSlopeSegments(points, truckProfile);
-          final findings = await RoadAnalysisService.instance.analyzeOsmRestrictions(points, truckProfile);
-          final riskLevel = RoadAnalysisService.instance.getMaxSeverity(slopeSegments, findings);
-
           // Parseia os steps de manobra (vêm dentro de legs)
           final legs = routeData['legs'] as List<dynamic>? ?? [];
           final steps = <RouteStep>[];
@@ -359,9 +355,9 @@ class TruckController extends ChangeNotifier {
             points: points,
             distance: distance,
             duration: duration,
-            slopeSegments: slopeSegments,
-            findings: findings,
-            riskLevel: riskLevel,
+            slopeSegments: [],
+            findings: [],
+            riskLevel: RoadHazardLevel.safe,
             steps: steps,
           ));
         }
@@ -388,6 +384,44 @@ class TruckController extends ChangeNotifier {
     } finally {
       _isRouting = false;
       notifyListeners();
+      
+      if (_availableRoutes.isNotEmpty) {
+        _runBackgroundAnalysis();
+      }
+    }
+  }
+
+  Future<void> _runBackgroundAnalysis() async {
+    try {
+      final reanalyzedRoutes = <TruckRoute>[];
+      for (final r in _availableRoutes) {
+        final slopeSegments = await RoadAnalysisService.instance.analyzeSlopeSegments(r.points, truckProfile);
+        final findings = await RoadAnalysisService.instance.analyzeOsmRestrictions(r.points, truckProfile);
+        final riskLevel = RoadAnalysisService.instance.getMaxSeverity(slopeSegments, findings);
+        
+        reanalyzedRoutes.add(TruckRoute(
+          points: r.points,
+          distance: r.distance,
+          duration: r.duration,
+          slopeSegments: slopeSegments,
+          findings: findings,
+          riskLevel: riskLevel,
+          steps: r.steps,
+        ));
+      }
+      
+      // Re-ordena as rotas agora com base no risco real calculado
+      reanalyzedRoutes.sort((a, b) {
+        final riskComparison = a.riskLevel.index.compareTo(b.riskLevel.index);
+        if (riskComparison != 0) return riskComparison;
+        return a.duration.compareTo(b.duration);
+      });
+      
+      _availableRoutes = reanalyzedRoutes;
+      _updateActiveRouteFields();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Erro na análise de background: $e');
     }
   }
 

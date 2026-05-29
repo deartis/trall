@@ -1207,9 +1207,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
 
           // ── BOTÕES LATERAIS ───────────────────────────────────────────────
-          Positioned(
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
             right: 16,
-            bottom: 32,
+            bottom: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
+                ? (tc.isNavigating ? 160 : 260)
+                : 32,
             child: Column(
               children: [
                 MapIconButton(

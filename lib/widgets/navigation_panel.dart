@@ -204,85 +204,87 @@ class NavigationPanel extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 14),
+          if (!isNavigating) ...[
+            const SizedBox(height: 14),
 
-          // ── Chips de perfil / ações ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-            child: Row(
-              children: [
-                _Chip(
-                  icon: Icons.settings_rounded,
-                  label: 'Ajustes',
-                  color: Colors.white.withValues(alpha: 0.5),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    );
-                  },
-                ),
-                const SizedBox(width: 8),
-                _Chip(
-                  icon: Icons.block_rounded,
-                  label: 'Evitar',
-                  color: tc.avoidTolls || tc.avoidFerries || tc.avoidUnpaved
-                      ? const Color(0xFFFF3B30)
-                      : Colors.white.withValues(alpha: 0.5),
-                  onTap: () {
-                    showModalBottomSheet(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      isScrollControlled: true,
-                      builder: (_) => const AvoidOptionsSheet(),
-                    );
-                  },
-                ),
-                const SizedBox(width: 8),
-                _Chip(
-                  icon: Icons.swap_horiz_rounded,
-                  label: 'Rotas',
-                  color: Colors.white.withValues(alpha: 0.5),
-                  onTap: onRoutesTap ?? () {},
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // ── Divisor com label ──
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.06),
+            // ── Chips de perfil / ações ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+              child: Row(
+                children: [
+                  _Chip(
+                    icon: Icons.settings_rounded,
+                    label: 'Ajustes',
+                    color: Colors.white.withValues(alpha: 0.5),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                      );
+                    },
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(
-                    'PRÓXIMA PARADA',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.25),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+                  const SizedBox(width: 8),
+                  _Chip(
+                    icon: Icons.block_rounded,
+                    label: 'Evitar',
+                    color: tc.avoidTolls || tc.avoidFerries || tc.avoidUnpaved
+                        ? const Color(0xFFFF3B30)
+                        : Colors.white.withValues(alpha: 0.5),
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        isScrollControlled: true,
+                        builder: (_) => const AvoidOptionsSheet(),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  _Chip(
+                    icon: Icons.swap_horiz_rounded,
+                    label: 'Rotas',
+                    color: Colors.white.withValues(alpha: 0.5),
+                    onTap: onRoutesTap ?? () {},
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ── Divisor com label ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 1,
+                      color: Colors.white.withValues(alpha: 0.06),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: Container(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.06),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Text(
+                      'PRÓXIMA PARADA',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.25),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: Container(
+                      height: 1,
+                      color: Colors.white.withValues(alpha: 0.06),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
 
           const SizedBox(height: 10),
 
