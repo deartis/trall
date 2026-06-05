@@ -9,30 +9,37 @@ import '../models/road_analysis.dart';
 import '../models/route_step.dart';
 import '../models/truck_profile.dart';
 import '../models/truck_route.dart';
-import '../services/database_service.dart';
+import '../services/api_service.dart';
 import '../services/road_analysis_service.dart';
 import '../services/truck_profile_service.dart';
 import '../services/tts_service.dart';
 
+import '../features/route/models/delivery_stop.dart';
+
 class TruckController extends ChangeNotifier {
-  LatLng? _destination;
+  List<DeliveryStop> _deliveryStops = [];
   List<LatLng> _routePoints = [];
   final List<TruckerMarker> _customMarkers = [];
   List<TruckRoute> _availableRoutes = [];
   int _selectedRouteIndex = 0;
 
   TruckController() {
-    loadMarkers();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await loadMarkers();
+    await restoreRoute();
   }
 
   Future<void> loadMarkers() async {
     try {
-      final markers = await DatabaseService.instance.getAllMarkers();
+      final markers = await ApiService.instance.fetchAlerts();
       _customMarkers.clear();
       _customMarkers.addAll(markers);
       notifyListeners();
     } catch (e) {
-      debugPrint('Erro ao carregar marcadores do banco: $e');
+      debugPrint('Erro ao carregar marcadores da API: $e');
     }
   }
   bool _isRouting = false;
@@ -58,7 +65,8 @@ class TruckController extends ChangeNotifier {
 
   List<String> _suggestions = [];
 
-  LatLng? get destination => _destination;
+  List<DeliveryStop> get deliveryStops => _deliveryStops;
+  LatLng? get destination => _deliveryStops.isNotEmpty ? LatLng(_deliveryStops.last.lat, _deliveryStops.last.lng) : null;
   List<LatLng> get routePoints => _routePoints;
   List<TruckerMarker> get customMarkers => _customMarkers;
   bool get isRouting => _isRouting;
@@ -118,7 +126,7 @@ class TruckController extends ChangeNotifier {
 
   void toggleAvoidTolls() {
     _avoidTolls = !_avoidTolls;
-    if (_destination != null && _routePoints.isNotEmpty) {
+    if (_deliveryStops.isNotEmpty && _routePoints.isNotEmpty) {
       fetchRoute(_routePoints.first); // Recalcula rota do ponto atual
     }
     notifyListeners();
@@ -126,7 +134,7 @@ class TruckController extends ChangeNotifier {
 
   void toggleAvoidFerries() {
     _avoidFerries = !_avoidFerries;
-    if (_destination != null && _routePoints.isNotEmpty) {
+    if (_deliveryStops.isNotEmpty && _routePoints.isNotEmpty) {
       fetchRoute(_routePoints.first);
     }
     notifyListeners();
@@ -134,7 +142,7 @@ class TruckController extends ChangeNotifier {
 
   void toggleAvoidUnpaved() {
     _avoidUnpaved = !_avoidUnpaved;
-    if (_destination != null && _routePoints.isNotEmpty) {
+    if (_deliveryStops.isNotEmpty && _routePoints.isNotEmpty) {
       fetchRoute(_routePoints.first);
     }
     notifyListeners();
@@ -210,7 +218,7 @@ class TruckController extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchSuggestions(String query) async {
+  Future<void> fetchSuggestions(String query, {LatLng? userLocation}) async {
     if (query.length < 3) {
       _suggestions = [];
       notifyListeners();
@@ -218,7 +226,19 @@ class TruckController extends ChangeNotifier {
     }
 
     try {
-      final url = 'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5';
+      String url = 'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5';
+      
+      if (userLocation != null) {
+        // Cria um raio de busca de aproximadamente 50km ao redor do usuário
+        final lat = userLocation.latitude;
+        final lon = userLocation.longitude;
+        final offset = 0.5; // ~55km em graus
+        final viewBox = '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
+        
+        // bounded=1 força a priorizar absurdamente essa região
+        url += '&viewbox=$viewBox&bounded=1';
+      }
+
       final response = await http.get(Uri.parse(url), headers: {'User-Agent': 'TrallZeroApp'});
       
       if (response.statusCode == 200) {
@@ -258,11 +278,64 @@ class TruckController extends ChangeNotifier {
   }
 
   Future<void> setDestination(LatLng point, LatLng userLocation) async {
-    _destination = point;
+    final stop = DeliveryStop(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      recipientName: 'Destino Rápido',
+      address: 'Ponto selecionado',
+      lat: point.latitude,
+      lng: point.longitude,
+    );
+    await setDeliveryStops([stop], userLocation);
+  }
+
+  Future<void> setDeliveryStops(List<DeliveryStop> stops, LatLng userLocation,
+      {bool fromRestore = false}) async {
+    _deliveryStops = stops;
     _isNavigating = false;
     _currentStepIndex = 0;
     await fetchRoute(userLocation);
+
+    // Salva na nuvem somente quando o motorista criou (não restaurando)
+    if (!fromRestore) {
+      final savedStops = await ApiService.instance.saveRoute(
+        stops.map((s) => s.toApiJson()).toList(),
+        truckProfile.type.name,
+      );
+      // Atualiza as paradas com os IDs reais do banco
+      if (savedStops != null) {
+        _deliveryStops = savedStops
+            .map((json) => DeliveryStop.fromApiJson(json))
+            .toList();
+      }
+    }
+
     notifyListeners();
+  }
+
+  /// Tenta restaurar silenciosamente a rota ativa do banco.
+  Future<void> restoreRoute() async {
+    try {
+      final stopsJson = await ApiService.instance.fetchActiveRoute();
+      if (stopsJson == null || stopsJson.isEmpty) return;
+
+      final stops = stopsJson.map((j) => DeliveryStop.fromApiJson(j)).toList();
+
+      // Calcula o ponto de início como a primeira parada não concluída
+      final firstPending = stops.firstWhere(
+        (s) => !s.isCompleted,
+        orElse: () => stops.first,
+      );
+      final startLoc = LatLng(firstPending.lat, firstPending.lng);
+
+      _deliveryStops = stops;
+      _isNavigating = false;
+      _currentStepIndex = 0;
+      await fetchRoute(startLoc);
+      notifyListeners();
+      debugPrint('Rota restaurada com ${stops.length} paradas.');
+    } catch (e) {
+      debugPrint('Erro ao restaurar rota: $e');
+    }
   }
 
   /// Alterna para a próxima rota alternativa disponível
@@ -292,26 +365,30 @@ class TruckController extends ChangeNotifier {
     );
 
     try {
-      await DatabaseService.instance.insertMarker(marker);
-      _customMarkers.add(marker);
-      notifyListeners();
+      final success = await ApiService.instance.postAlert(marker);
+      if (success) {
+        _customMarkers.add(marker);
+        notifyListeners();
+      } else {
+        debugPrint('Erro: Falha ao enviar marcador para a API');
+      }
     } catch (e) {
-      debugPrint('Erro ao salvar marcador no banco: $e');
+      debugPrint('Erro ao enviar marcador para API: $e');
     }
   }
 
   Future<void> removeMarker(String id) async {
     try {
-      await DatabaseService.instance.deleteMarker(id);
+      // Como não temos delete na API ainda, deletamos só localmente
       _customMarkers.removeWhere((m) => m.id == id);
       notifyListeners();
     } catch (e) {
-      debugPrint('Erro ao deletar marcador no banco: $e');
+      debugPrint('Erro ao deletar marcador local: $e');
     }
   }
 
   Future<void> fetchRoute(LatLng start) async {
-    if (_destination == null) return;
+    if (_deliveryStops.isEmpty) return;
 
     _isRouting = true;
     notifyListeners();
@@ -325,9 +402,12 @@ class TruckController extends ChangeNotifier {
       
       final excludeParam = excludes.isNotEmpty ? '&exclude=${excludes.join(',')}' : '';
 
-      final url = 'https://router.project-osrm.org/route/v1/driving/'
-          '${start.longitude},${start.latitude};'
-          '${_destination!.longitude},${_destination!.latitude}'
+      String coordinates = '${start.longitude},${start.latitude}';
+      for (var stop in _deliveryStops) {
+        coordinates += ';${stop.lng},${stop.lat}';
+      }
+
+      final url = 'https://router.project-osrm.org/route/v1/driving/$coordinates'
           '?overview=full&geometries=geojson&alternatives=true&steps=true$excludeParam';
 
       final response = await http.get(Uri.parse(url));
@@ -443,8 +523,14 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> endRoute() async {
+    // Encerra no banco antes de limpar o estado local
+    await ApiService.instance.clearActiveRoute();
+    clearRoute();
+  }
+
   void clearRoute() {
-    _destination = null;
+    _deliveryStops.clear();
     _routePoints = [];
     _routeAnalysisSegments = [];
     _routeAnalysisFindings = [];

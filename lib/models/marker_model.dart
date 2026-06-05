@@ -5,7 +5,10 @@ enum MarkerType {
   unloading,
   restriction,
   weighStation,
-  parking
+  parking,
+  police,
+  danger,
+  other
 }
 
 class TruckerMarker {

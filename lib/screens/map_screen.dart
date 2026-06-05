@@ -12,7 +12,6 @@ import '../controllers/truck_controller.dart';
 import '../map_layers/road_analysis_layer.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
-import '../widgets/map_icon_button.dart';
 import '../widgets/navigation_panel.dart';
 
 // ============================================================
@@ -59,7 +58,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   LatLngTween? _vehicleLatLngTween; // Tween para transição suave do veículo
   Animation<double>? _activeAnimation; // Animação ativa com suporte a curvas
   DateTime? _lastGpsUpdateTime; // Timestamp para medir o intervalo real do GPS
-  Duration _animationDuration = const Duration(milliseconds: 900); // Duração adaptativa
+  Duration _animationDuration = const Duration(
+    milliseconds: 900,
+  ); // Duração adaptativa
 
   // --- Heading ---
   final ValueNotifier<double> _headingNotifier = ValueNotifier<double>(0.0);
@@ -113,7 +114,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
 
       // Se não há interpolação de câmera definida (ex: modo livre), interrompe aqui
-      if (_latLngTween == null || _rotationTween == null || _zoomTween == null) {
+      if (_latLngTween == null ||
+          _rotationTween == null ||
+          _zoomTween == null) {
         return;
       }
 
@@ -344,7 +347,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     _compassCheckTimer = Timer(const Duration(seconds: 4), () {
       if ((!_compassAvailable || _isCompassDummy) && mounted) {
-        debugPrint('[Sensor] Bússola não funcional – usando GPS como fallback.');
+        debugPrint(
+          '[Sensor] Bússola não funcional – usando GPS como fallback.',
+        );
       }
     });
 
@@ -606,7 +611,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
-                    selected ? Icons.check_circle_rounded : Icons.local_shipping_rounded,
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.local_shipping_rounded,
                     color: selected ? const Color(0xFF34C759) : Colors.white70,
                   ),
                   title: Text(
@@ -618,10 +625,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   ),
                   subtitle: Text(
                     '${profile.maxWeightKg.toInt()} kg • ${profile.maxHeightMeters} m • ${profile.axles} eixos',
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
                   ),
                   onTap: () {
                     tc.setTruckProfile(profile);
@@ -640,39 +644,46 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF111318),
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        padding: EdgeInsets.fromLTRB(
+            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // Handle
             Container(
-              width: 36,
+              width: 40,
               height: 4,
-              margin: const EdgeInsets.only(bottom: 20),
+              margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const Text(
-              'MARCAR LOCAL',
+              'O QUE É ESTE LOCAL?',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 2,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.8,
               ),
             ),
-            const SizedBox(height: 24),
-            Wrap(
-              spacing: 12,
-              runSpacing: 16,
-              alignment: WrapAlignment.center,
+            const SizedBox(height: 20),
+            // Grade 2 colunas — botões grandes para dedão com luva
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 2.6,
               children: MarkerType.values.map((type) {
+                final color = _markerColor(type);
                 return GestureDetector(
                   onTap: () {
                     context.read<TruckController>().addMarker(
@@ -682,36 +693,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     );
                     Navigator.pop(context);
                   },
-                  child: SizedBox(
-                    width: 72,
-                    child: Column(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.35),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: _markerColor(type).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: _markerColor(type).withValues(alpha: 0.4),
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Icon(
-                            _markerIcon(type),
-                            color: _markerColor(type),
-                            size: 26,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
+                        Icon(_markerIcon(type), color: color, size: 24),
+                        const SizedBox(width: 8),
                         Text(
                           _markerLabel(type),
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
                           ),
-                          textAlign: TextAlign.center,
                         ),
                       ],
                     ),
@@ -735,7 +737,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(
-          20, 12, 20, MediaQuery.of(ctx).padding.bottom + 20,
+          20,
+          12,
+          20,
+          MediaQuery.of(ctx).padding.bottom + 20,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -798,12 +803,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               height: 52,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF3B30).withValues(alpha: 0.15),
+                  backgroundColor: const Color(
+                    0xFFFF3B30,
+                  ).withValues(alpha: 0.15),
                   foregroundColor: const Color(0xFFFF3B30),
-                  side: const BorderSide(
-                    color: Color(0xFFFF3B30),
-                    width: 1,
-                  ),
+                  side: const BorderSide(color: Color(0xFFFF3B30), width: 1),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -832,6 +836,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.restriction => const Color(0xFFFF3B30),
     MarkerType.weighStation => const Color(0xFFFF9500),
     MarkerType.parking => const Color(0xFFAF52DE),
+    MarkerType.police => const Color(0xFF1E90FF),
+    MarkerType.danger => const Color(0xFFFF0000),
+    MarkerType.other => const Color(0xFF8E8E93),
   };
 
   IconData _markerIcon(MarkerType t) => switch (t) {
@@ -840,6 +847,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.restriction => Icons.block_rounded,
     MarkerType.weighStation => Icons.scale_rounded,
     MarkerType.parking => Icons.local_parking_rounded,
+    MarkerType.police => Icons.local_police_rounded,
+    MarkerType.danger => Icons.warning_rounded,
+    MarkerType.other => Icons.info_rounded,
   };
 
   String _markerLabel(MarkerType t) => switch (t) {
@@ -848,6 +858,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.restriction => 'Restrição',
     MarkerType.weighStation => 'Balança',
     MarkerType.parking => 'Pátio',
+    MarkerType.police => 'Polícia',
+    MarkerType.danger => 'Perigo',
+    MarkerType.other => 'Outros',
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -881,25 +894,35 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               onLongPress: (_, point) => _showAddMarkerDialog(point),
             ),
             children: [
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.trallzero.app',
+              ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  1.4, 0, 0, 0, 30, // Red: multiply by 1.4, add 30
+                  0, 1.4, 0, 0, 30, // Green
+                  0, 0, 1.4, 0, 30, // Blue
+                  0, 0, 0, 1, 0,    // Alpha
+                ]),
+                child: TileLayer(
+                  urlTemplate:
+                      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  userAgentPackageName: 'com.trallzero.app',
+                ),
               ),
               if (tc.routePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
-                    ...tc.availableRoutes.asMap().entries
+                    ...tc.availableRoutes
+                        .asMap()
+                        .entries
                         .where((entry) => entry.key != tc.selectedRouteIndex)
                         .map((entry) {
-                      final route = entry.value;
-                      return Polyline(
-                        points: route.points,
-                        color: Colors.white.withValues(alpha: 0.18),
-                        strokeWidth: 5.0,
-                      );
-                    }),
+                          final route = entry.value;
+                          return Polyline(
+                            points: route.points,
+                            color: Colors.white.withValues(alpha: 0.18),
+                            strokeWidth: 5.0,
+                          );
+                        }),
                     ...(tc.routeAnalysisSegments.isNotEmpty
                         ? buildRoadAnalysisPolylines(tc.routeAnalysisSegments)
                         : [
@@ -921,18 +944,37 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       rotate: true,
                       child: const NavigationMarker(),
                     ),
-                  if (tc.destination != null)
-                    Marker(
-                      point: tc.destination!,
+                  ...tc.deliveryStops.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final stop = entry.value;
+                    return Marker(
+                      point: LatLng(stop.lat, stop.lng),
                       width: 40,
                       height: 40,
                       rotate: true,
-                      child: const Icon(
-                        Icons.flag_rounded,
-                        color: Color(0xFF34C759),
-                        size: 35,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            color: Color(0xFF34C759),
+                            size: 40,
+                          ),
+                          Positioned(
+                            top: 6,
+                            child: Text(
+                              '${index + 1}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                    );
+                  }),
                   ...tc.customMarkers.map(
                     (m) => Marker(
                       point: m.position,
@@ -946,7 +988,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             color: _markerColor(m.type).withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: _markerColor(m.type).withValues(alpha: 0.5),
+                              color: _markerColor(
+                                m.type,
+                              ).withValues(alpha: 0.5),
                             ),
                           ),
                           child: Icon(
@@ -975,145 +1019,149 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               opacity: _isFullScreen ? 0.0 : 1.0,
               child: Column(
                 children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF111318).withValues(alpha: 0.95),
-                    borderRadius: tc.suggestions.isNotEmpty
-                        ? const BorderRadius.vertical(top: Radius.circular(16))
-                        : BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.blueAccent.withValues(alpha: 0.2),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    style: const TextStyle(color: Colors.white, fontSize: 15),
-                    decoration: InputDecoration(
-                      hintText: 'Para onde vamos, motorista?',
-                      hintStyle: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.35),
-                        fontSize: 15,
-                      ),
-                      border: InputBorder.none,
-                      icon: const Icon(
-                        Icons.search_rounded,
-                        color: Colors.blueAccent,
-                        size: 20,
-                      ),
-                      suffixIcon:
-                          tc.destination != null ||
-                              _searchController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(
-                                Icons.close_rounded,
-                                color: Colors.white38,
-                                size: 18,
-                              ),
-                              onPressed: () {
-                                _searchController.clear();
-                                tc.clearRoute();
-                                _mapController.rotate(0);
-                                setState(() {
-                                  _offRouteCount = 0;
-                                  _isRecalculating = false;
-                                  _showReroutingBanner = false;
-                                });
-                              },
-                            )
-                          : null,
-                    ),
-                    onSubmitted: (value) async {
-                      if (value.isNotEmpty && _currentPosition != null) {
-                        final dest = await tc.searchAddress(
-                          value,
-                          _currentPosition!,
-                        );
-                        if (dest != null) _mapController.move(dest, 16);
-                      }
-                    },
-                  ),
-                ),
-                if (tc.suggestions.isNotEmpty)
                   Container(
-                    constraints: const BoxConstraints(maxHeight: 240),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF111318).withValues(alpha: 0.97),
-                      borderRadius: const BorderRadius.vertical(
-                        bottom: Radius.circular(16),
-                      ),
+                      color: const Color(0xFF111318).withValues(alpha: 0.95),
+                      borderRadius: tc.suggestions.isNotEmpty
+                          ? const BorderRadius.vertical(
+                              top: Radius.circular(16),
+                            )
+                          : BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.blueAccent.withValues(alpha: 0.15),
+                        color: Colors.blueAccent.withValues(alpha: 0.2),
                       ),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.4),
                           blurRadius: 16,
-                          offset: const Offset(0, 8),
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
-                    child: ListView.separated(
-                      padding: EdgeInsets.zero,
-                      shrinkWrap: true,
-                      itemCount: tc.suggestions.length,
-                      separatorBuilder: (context, index) => Divider(
-                        color: Colors.white.withValues(alpha: 0.06),
-                        height: 1,
-                        indent: 44,
+                    child: TextField(
+                      controller: _searchController,
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: 'Para onde vamos, motorista?',
+                        hintStyle: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.35),
+                          fontSize: 15,
+                        ),
+                        border: InputBorder.none,
+                        icon: const Icon(
+                          Icons.search_rounded,
+                          color: Colors.blueAccent,
+                          size: 20,
+                        ),
+                        suffixIcon:
+                            tc.destination != null ||
+                                _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.close_rounded,
+                                  color: Colors.white38,
+                                  size: 18,
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  tc.clearRoute();
+                                  _mapController.rotate(0);
+                                  setState(() {
+                                    _offRouteCount = 0;
+                                    _isRecalculating = false;
+                                    _showReroutingBanner = false;
+                                  });
+                                },
+                              )
+                            : null,
                       ),
-                      itemBuilder: (_, i) {
-                        final s = tc.suggestions[i];
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(
-                            Icons.location_on_rounded,
-                            color: Colors.blueAccent,
-                            size: 18,
-                          ),
-                          title: Text(
-                            s,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          onTap: () async {
-                            _searchController.text = s;
-                            FocusScope.of(context).unfocus();
-                            if (_currentPosition != null) {
-                              final dest = await tc.searchAddress(
-                                s,
-                                _currentPosition!,
-                              );
-                              if (dest != null) _mapController.move(dest, 16);
-                            }
-                          },
-                        );
+                      onSubmitted: (value) async {
+                        if (value.isNotEmpty && _currentPosition != null) {
+                          final dest = await tc.searchAddress(
+                            value,
+                            _currentPosition!,
+                          );
+                          if (dest != null) _mapController.move(dest, 16);
+                        }
                       },
                     ),
                   ),
-              ],
+                  if (tc.suggestions.isNotEmpty)
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 240),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF111318).withValues(alpha: 0.97),
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(16),
+                        ),
+                        border: Border.all(
+                          color: Colors.blueAccent.withValues(alpha: 0.15),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.4),
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: ListView.separated(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: tc.suggestions.length,
+                        separatorBuilder: (context, index) => Divider(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          height: 1,
+                          indent: 44,
+                        ),
+                        itemBuilder: (_, i) {
+                          final s = tc.suggestions[i];
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.location_on_rounded,
+                              color: Colors.blueAccent,
+                              size: 18,
+                            ),
+                            title: Text(
+                              s,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () async {
+                              _searchController.text = s;
+                              FocusScope.of(context).unfocus();
+                              if (_currentPosition != null) {
+                                final dest = await tc.searchAddress(
+                                  s,
+                                  _currentPosition!,
+                                );
+                                if (dest != null) _mapController.move(dest, 16);
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
 
-        // ── BANNER DE RECÁLCULO DE ROTA ───────────────────────────────────
+          // ── BANNER DE RECÁLCULO DE ROTA ───────────────────────────────────
           Positioned(
             top: MediaQuery.of(context).padding.top + 80,
             left: 16,
             right: 16,
             child: AnimatedSlide(
-              offset: _showReroutingBanner ? Offset.zero : const Offset(0, -0.3),
+              offset: _showReroutingBanner
+                  ? Offset.zero
+                  : const Offset(0, -0.3),
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeOutCubic,
               child: AnimatedOpacity(
@@ -1121,7 +1169,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 duration: const Duration(milliseconds: 200),
                 child: Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF111318).withValues(alpha: 0.95),
                       borderRadius: BorderRadius.circular(14),
@@ -1183,6 +1234,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 speed: _lastKnownSpeed,
                 onProfileTap: _showTruckProfileSheet,
                 onRoutesTap: tc.cycleRoute,
+                onEndRoute: () async {
+                  await context.read<TruckController>().endRoute();
+                  _mapController.rotate(0);
+                },
                 onGo: () {
                   tc.toggleNavigation();
                   if (tc.isNavigating) {
@@ -1206,7 +1261,38 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
 
+
           // ── BOTÕES LATERAIS ───────────────────────────────────────────────
+          // Botões de zoom: canto ESQUERDO inferior (não colide com nav panel)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            left: 16,
+            bottom: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
+                ? (tc.isNavigating ? 160 : 260)
+                : 32,
+            child: Column(
+              children: [
+                _LargeMapButton(
+                  icon: Icons.add_rounded,
+                  onPressed: () => _mapController.move(
+                    _mapController.camera.center,
+                    _mapController.camera.zoom + 1,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _LargeMapButton(
+                  icon: Icons.remove_rounded,
+                  onPressed: () => _mapController.move(
+                    _mapController.camera.center,
+                    _mapController.camera.zoom - 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Botões de controle: canto DIREITO inferior
           AnimatedPositioned(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutCubic,
@@ -1216,28 +1302,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 : 32,
             child: Column(
               children: [
-                MapIconButton(
-                  icon: Icons.add_rounded,
-                  onPressed: () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom + 1,
-                  ),
+                _LargeMapButton(
+                  icon: _isFullScreen
+                      ? Icons.fullscreen_exit_rounded
+                      : Icons.fullscreen_rounded,
+                  onPressed: () =>
+                      setState(() => _isFullScreen = !_isFullScreen),
                 ),
-                const SizedBox(height: 8),
-                MapIconButton(
-                  icon: Icons.remove_rounded,
-                  onPressed: () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom - 1,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                MapIconButton(
-                  icon: _isFullScreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                  onPressed: () => setState(() => _isFullScreen = !_isFullScreen),
-                ),
-                const SizedBox(height: 16),
-                MapIconButton(
+                const SizedBox(height: 10),
+                _LargeMapButton(
                   icon: _isFollowMode
                       ? Icons.navigation_rounded
                       : Icons.my_location_rounded,
@@ -1275,6 +1348,61 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  BOTÃO GRANDE DO MAPA (acessível para uso com luvas)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LargeMapButton extends StatelessWidget {
+  const _LargeMapButton({
+    required this.icon,
+    required this.onPressed,
+    this.isPrimary = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool isPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: isPrimary
+                ? const Color(0xFF2563EB)
+                : const Color(0xFF1A1D26).withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isPrimary
+                  ? const Color(0xFF2563EB)
+                  : Colors.white.withValues(alpha: 0.12),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Icon(
+            icon,
+            color: isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.85),
+            size: 26,
+          ),
+        ),
       ),
     );
   }

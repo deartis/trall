@@ -9,6 +9,8 @@ class PreferencesService extends ChangeNotifier {
   late SharedPreferences _prefs;
   bool _isInitialized = false;
 
+  SharedPreferences get prefs => _prefs;
+
   // --- Chaves ---
   static const String _keyTtsEnabled = 'ttsEnabled';
   static const String _keyDefaultProfileId = 'defaultProfileId';

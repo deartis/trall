@@ -30,6 +30,7 @@ class NavigationPanel extends StatelessWidget {
     required this.onStop,
     this.onProfileTap,
     this.onRoutesTap,
+    this.onEndRoute,
   });
 
   final double heading;
@@ -38,6 +39,7 @@ class NavigationPanel extends StatelessWidget {
   final VoidCallback onStop;
   final VoidCallback? onProfileTap;
   final VoidCallback? onRoutesTap;
+  final VoidCallback? onEndRoute;
 
   // Converte m/s para km/h
   double get _kmh => speed * 3.6;
@@ -219,7 +221,8 @@ class NavigationPanel extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()),
                       );
                     },
                   ),
@@ -245,6 +248,14 @@ class NavigationPanel extends StatelessWidget {
                     label: 'Rotas',
                     color: Colors.white.withValues(alpha: 0.5),
                     onTap: onRoutesTap ?? () {},
+                  ),
+                  const Spacer(),
+                  // Botão encerrar rota — canto direito, vermelho discreto
+                  _Chip(
+                    icon: Icons.stop_circle_outlined,
+                    label: 'Encerrar',
+                    color: const Color(0xFFFF3B30).withValues(alpha: 0.8),
+                    onTap: onEndRoute ?? () {},
                   ),
                 ],
               ),

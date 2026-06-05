@@ -26,6 +26,8 @@ dependencies:
   path: ^1.9.1
   flutter_tts: ^4.2.5
   shared_preferences: ^2.5.5
+  google_mlkit_text_recognition: ^0.15.1
+  image_picker: ^1.2.2
 
 dev_dependencies:
   flutter_test:
