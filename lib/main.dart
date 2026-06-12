@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'features/home/screens/home_screen.dart';
 import 'features/route/screens/route_manager_screen.dart';
 import 'controllers/truck_controller.dart';
@@ -7,6 +8,7 @@ import 'services/preferences_service.dart';
 import 'services/api_service.dart';
 import 'services/truck_profile_service.dart';
 import 'models/truck_profile.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +45,8 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
         colorSchemeSeed: const Color(0xFFE07B1A), // Laranja âmbar
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+        fontFamily: GoogleFonts.inter().fontFamily,
       ),
       initialRoute: '/',
       routes: {

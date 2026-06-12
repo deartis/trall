@@ -3,16 +3,22 @@ import 'dart:math' as math;
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../services/location_service.dart';
+import '../services/ocr_service.dart';
 import '../widgets/navigation_marker.dart';
+import '../widgets/proactive_alert_hud.dart';
 import '../controllers/truck_controller.dart';
 import '../map_layers/road_analysis_layer.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
 import '../widgets/navigation_panel.dart';
+import '../features/route/models/delivery_stop.dart';
+import '../features/route/screens/route_manager_screen.dart';
+
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -78,6 +84,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   // --- Follow mode e FullScreen ---
   bool _isFollowMode = true;
   bool _isFullScreen = false;
+
+  // --- OCR ---
+  bool _isOcrLoading = false;
+
+  // --- RepaintBoundary key (compartilhar rota) ---
+  final GlobalKey _mapRepaintKey = GlobalKey();
 
   // --- Recálculo de Rota Automático (Rerouting) ---
   int _offRouteCount = 0;
@@ -578,6 +590,99 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     });
   }
 
+  // Abre câmera ou galeria, extrai endereço via OCR e preenche a busca
+  Future<void> _pickImageAndExtractAddress() async {
+    // Mostra menu de fonte de imagem
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFF111318),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36, height: 3,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'ESCANEAR ENDEREÇO',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded, color: Color(0xFF2563EB)),
+                ),
+                title: const Text('Câmera', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: Text('Fotografe a nota ou etiqueta', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                leading: Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF34C759).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.photo_library_rounded, color: Color(0xFF34C759)),
+                ),
+                title: const Text('Galeria', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: Text('Selecione uma imagem salva', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    setState(() => _isOcrLoading = true);
+    try {
+      final picked = await ImagePicker().pickImage(source: source, imageQuality: 90);
+      if (picked == null) return;
+
+      final rawText = await OcrService.instance.extractTextFromImage(picked.path);
+      final address = OcrService.instance.parseAddressFromText(rawText);
+
+      if (address.isNotEmpty && mounted) {
+        _searchController.text = address;
+        context.read<TruckController>().fetchSuggestions(address);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível extrair um endereço da imagem.'),
+            backgroundColor: Color(0xFF1E2128),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[OCR] Erro: $e');
+    } finally {
+      if (mounted) setState(() => _isOcrLoading = false);
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   //  MARCADORES COLABORATIVOS
   // ─────────────────────────────────────────────────────────────────────────
@@ -838,6 +943,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.parking => const Color(0xFFAF52DE),
     MarkerType.police => const Color(0xFF1E90FF),
     MarkerType.danger => const Color(0xFFFF0000),
+    MarkerType.gasStation => const Color(0xFFF59E0B),
+    MarkerType.mechanic => const Color(0xFF6B7280),
+    MarkerType.restaurant => const Color(0xFFEC4899),
     MarkerType.other => const Color(0xFF8E8E93),
   };
 
@@ -849,6 +957,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.parking => Icons.local_parking_rounded,
     MarkerType.police => Icons.local_police_rounded,
     MarkerType.danger => Icons.warning_rounded,
+    MarkerType.gasStation => Icons.local_gas_station_rounded,
+    MarkerType.mechanic => Icons.build_circle_rounded,
+    MarkerType.restaurant => Icons.restaurant_rounded,
     MarkerType.other => Icons.info_rounded,
   };
 
@@ -860,6 +971,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.parking => 'Pátio',
     MarkerType.police => 'Polícia',
     MarkerType.danger => 'Perigo',
+    MarkerType.gasStation => 'Posto',
+    MarkerType.mechanic => 'Mecânica',
+    MarkerType.restaurant => 'Parada',
     MarkerType.other => 'Outros',
   };
 
@@ -875,25 +989,27 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // ── MAPA ──────────────────────────────────────────────────────────
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _initialCenter,
-              initialZoom: 13,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all,
+          // ── MAPA ────────────────────────────────────────────────────────────
+          RepaintBoundary(
+            key: _mapRepaintKey,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _initialCenter,
+                initialZoom: 13,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all,
+                ),
+                onMapEvent: (event) {
+                  if (_isFollowMode && event.source == MapEventSource.dragStart) {
+                    setState(() => _isFollowMode = false);
+                    _cameraAnimationController?.stop();
+                  }
+                },
+                onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
+                onLongPress: (_, point) => _showAddMarkerDialog(point),
               ),
-              onMapEvent: (event) {
-                if (_isFollowMode && event.source == MapEventSource.dragStart) {
-                  setState(() => _isFollowMode = false);
-                  _cameraAnimationController?.stop();
-                }
-              },
-              onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
-              onLongPress: (_, point) => _showAddMarkerDialog(point),
-            ),
-            children: [
+              children: [
               ColorFiltered(
                 colorFilter: const ColorFilter.matrix(<double>[
                   1.4, 0, 0, 0, 30, // Red: multiply by 1.4, add 30
@@ -975,7 +1091,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       ),
                     );
                   }),
-                  ...tc.customMarkers.map(
+                  ...[...tc.customMarkers, ...tc.automaticPOIs].map(
                     (m) => Marker(
                       point: m.position,
                       width: 44,
@@ -1006,6 +1122,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
+          ), // RepaintBoundary
 
           // ── BARRA DE BUSCA ────────────────────────────────────────────────
           AnimatedPositioned(
@@ -1054,15 +1171,30 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           color: Colors.blueAccent,
                           size: 20,
                         ),
-                        suffixIcon:
-                            tc.destination != null ||
-                                _searchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(
-                                  Icons.close_rounded,
-                                  color: Colors.white38,
-                                  size: 18,
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Botão OCR / câmera
+                            if (_isOcrLoading)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: SizedBox(
+                                  width: 16, height: 16,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.blueAccent, strokeWidth: 2,
+                                  ),
                                 ),
+                              )
+                            else if (tc.destination == null && _searchController.text.isEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.document_scanner_rounded, color: Colors.blueAccent, size: 20),
+                                tooltip: 'Escanear nota fiscal',
+                                onPressed: _pickImageAndExtractAddress,
+                              ),
+                            // Botão limpar
+                            if (tc.destination != null || _searchController.text.isNotEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
                                 onPressed: () {
                                   _searchController.clear();
                                   tc.clearRoute();
@@ -1073,8 +1205,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     _showReroutingBanner = false;
                                   });
                                 },
-                              )
-                            : null,
+                              ),
+                          ],
+                        ),
                       ),
                       onSubmitted: (value) async {
                         if (value.isNotEmpty && _currentPosition != null) {
@@ -1087,6 +1220,40 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       },
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  if (tc.suggestions.isEmpty)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (tc.automaticPOIs.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: FloatingActionButton.small(
+                              heroTag: 'clear_pois',
+                              backgroundColor: const Color(0xFF111318),
+                              onPressed: tc.clearAutomaticPOIs,
+                              child: const Icon(Icons.clear_all_rounded, color: Colors.white70),
+                            ),
+                          ),
+                        FloatingActionButton.extended(
+                          heroTag: 'find_pois',
+                          backgroundColor: const Color(0xFF2563EB),
+                          icon: tc.isLoadingPOIs 
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.local_gas_station_rounded, color: Colors.white, size: 20),
+                          label: Text(tc.isLoadingPOIs ? 'Buscando...' : 'Locais Próximos', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                          onPressed: tc.isLoadingPOIs ? null : () {
+                            if (_currentPosition != null) {
+                              tc.findNearbyPOIs(_currentPosition!);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Aguardando sinal de GPS...')),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                   if (tc.suggestions.isNotEmpty)
                     Container(
                       constraints: const BoxConstraints(maxHeight: 240),
@@ -1225,42 +1392,80 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
           // ── PAINEL DE NAVEGAÇÃO ───────────────────────────────────────────
           if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: NavigationPanel(
-                heading: _heading,
-                speed: _lastKnownSpeed,
-                onProfileTap: _showTruckProfileSheet,
-                onRoutesTap: tc.cycleRoute,
-                onEndRoute: () async {
-                  await context.read<TruckController>().endRoute();
-                  _mapController.rotate(0);
-                },
-                onGo: () {
-                  tc.toggleNavigation();
-                  if (tc.isNavigating) {
-                    setState(() {
-                      _isFollowMode = true;
-                      _offRouteCount = 0;
-                      _isRecalculating = false;
-                      _showReroutingBanner = false;
-                    });
-                    if (_currentPosition != null) {
-                      _moveNavigationCamera(_currentPosition!);
+            // NavigationPanel é um DraggableScrollableSheet — deve ser filho
+            // direto do Stack (sem Positioned) para funcionar corretamente
+            NavigationPanel(
+              heading: _heading,
+              speed: _lastKnownSpeed,
+              onProfileTap: _showTruckProfileSheet,
+              onRoutesTap: tc.cycleRoute,
+              onStopsTap: () async {
+                final truckCtrl = context.read<TruckController>();
+                final result = await Navigator.push<List<DeliveryStop>>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RouteManagerScreen(),
+                  ),
+                );
+
+                if (result != null && mounted) {
+                  LatLng startLoc = const LatLng(-22.9068, -43.1729);
+                  try {
+                    if (await LocationService.handlePermission()) {
+                      final pos = await LocationService.getCurrentPosition();
+                      startLoc = LatLng(pos.latitude, pos.longitude);
                     }
-                  } else {
-                    _mapController.rotate(0);
+                  } catch (e) {
+                    debugPrint('Erro ao buscar localização inicial: $e');
                   }
-                },
-                onStop: () {
-                  tc.toggleNavigation();
+
+                  if (mounted) {
+                    truckCtrl.setDeliveryStops(result, startLoc);
+                  }
+                }
+              },
+              mapRepaintKey: _mapRepaintKey,
+              onEndRoute: () async {
+                await context.read<TruckController>().endRoute();
+                _mapController.rotate(0);
+              },
+              onAddMarkerAtCurrentPosition: _currentPosition == null
+                  ? null
+                  : () => _showAddMarkerDialog(_currentPosition!),
+              onGo: () {
+                tc.toggleNavigation();
+                if (tc.isNavigating) {
+                  setState(() {
+                    _isFollowMode = true;
+                    _offRouteCount = 0;
+                    _isRecalculating = false;
+                    _showReroutingBanner = false;
+                  });
+                  if (_currentPosition != null) {
+                    _moveNavigationCamera(_currentPosition!);
+                  }
+                } else {
                   _mapController.rotate(0);
-                },
-              ),
+                }
+              },
+              onStop: () {
+                tc.toggleNavigation();
+                _mapController.rotate(0);
+              },
             ),
 
+          // ── HUD DE ALERTAS PROATIVOS ──────────────────────────────────────
+          if (tc.isNavigating && tc.routePoints.isNotEmpty)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 76,
+              left: 0,
+              right: 0,
+              child: ProactiveAlertHud(
+                markers: [...tc.customMarkers, ...tc.automaticPOIs],
+                currentPosition: _currentPosition,
+                routePoints: tc.routePoints,
+              ),
+            ),
 
           // ── BOTÕES LATERAIS ───────────────────────────────────────────────
           // Botões de zoom: canto ESQUERDO inferior (não colide com nav panel)

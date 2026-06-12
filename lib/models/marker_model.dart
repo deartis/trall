@@ -8,6 +8,9 @@ enum MarkerType {
   parking,
   police,
   danger,
+  gasStation,
+  mechanic,
+  restaurant,
   other
 }
 

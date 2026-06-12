@@ -182,6 +182,9 @@ class ApiService {
       case 'RISK_AREA': return MarkerType.danger;
       case 'PROHIBITED_AREA': return MarkerType.danger;
       case 'HILL': return MarkerType.danger;
+      case 'GAS_STATION': return MarkerType.gasStation;
+      case 'MECHANIC': return MarkerType.mechanic;
+      case 'RESTAURANT': return MarkerType.restaurant;
       default: return MarkerType.other;
     }
   }
@@ -195,6 +198,9 @@ class ApiService {
       case MarkerType.loading: return 'LOAD_UNLOAD';
       case MarkerType.unloading: return 'LOAD_UNLOAD';
       case MarkerType.parking: return 'OTHER';
+      case MarkerType.gasStation: return 'GAS_STATION';
+      case MarkerType.mechanic: return 'MECHANIC';
+      case MarkerType.restaurant: return 'RESTAURANT';
       case MarkerType.other: return 'OTHER';
     }
   }

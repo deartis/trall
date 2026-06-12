@@ -13,13 +13,21 @@ import '../services/api_service.dart';
 import '../services/road_analysis_service.dart';
 import '../services/truck_profile_service.dart';
 import '../services/tts_service.dart';
+import '../services/poi_service.dart';
 
 import '../features/route/models/delivery_stop.dart';
+import '../widgets/recent_destinations.dart';
+
+
+enum FatigueSeverity { none, warning, danger, critical }
+
 
 class TruckController extends ChangeNotifier {
   List<DeliveryStop> _deliveryStops = [];
   List<LatLng> _routePoints = [];
   final List<TruckerMarker> _customMarkers = [];
+  final List<TruckerMarker> _automaticPOIs = [];
+  bool _isLoadingPOIs = false;
   List<TruckRoute> _availableRoutes = [];
   int _selectedRouteIndex = 0;
 
@@ -69,6 +77,8 @@ class TruckController extends ChangeNotifier {
   LatLng? get destination => _deliveryStops.isNotEmpty ? LatLng(_deliveryStops.last.lat, _deliveryStops.last.lng) : null;
   List<LatLng> get routePoints => _routePoints;
   List<TruckerMarker> get customMarkers => _customMarkers;
+  List<TruckerMarker> get automaticPOIs => _automaticPOIs;
+  bool get isLoadingPOIs => _isLoadingPOIs;
   bool get isRouting => _isRouting;
   bool get isNavigating => _isNavigating;
   List<String> get suggestions => _suggestions;
@@ -85,6 +95,24 @@ class TruckController extends ChangeNotifier {
 
   int get drivingSeconds => _drivingSeconds;
   bool get hasFatigueAlert => _isFatigueAlertTriggered;
+
+  /// Nível de fadiga gradual baseado no tempo de direção contínua
+  FatigueSeverity get fatigueSeverity {
+    if (_drivingSeconds < 4 * 3600) return FatigueSeverity.none;       // < 4h
+    if (_drivingSeconds < 5 * 3600) return FatigueSeverity.warning;    // 4h-5h
+    if (_drivingSeconds < _fatigueLimitSeconds) return FatigueSeverity.danger; // 5h-5h30
+    return FatigueSeverity.critical;                                    // > 5h30
+  }
+
+  /// Distância percorrida na rota atual em metros (para a RouteRiskBar)
+  double get progressOnRouteMeters {
+    if (_routePoints.isEmpty) return 0;
+    return (_distance * (_currentStepIndex / 
+        (_availableRoutes.isNotEmpty && _availableRoutes[_selectedRouteIndex].steps.isNotEmpty
+          ? _availableRoutes[_selectedRouteIndex].steps.length
+          : 1))).clamp(0.0, _distance);
+  }
+
 
   String get formattedDrivingTime {
     final h = (_drivingSeconds / 3600).floor();
@@ -266,6 +294,8 @@ class TruckController extends ChangeNotifier {
       if (locations.isNotEmpty) {
         final point = LatLng(locations.first.latitude, locations.first.longitude);
         await setDestination(point, userLocation);
+        // Persiste o destino buscado com sucesso
+        await RecentDestinations.saveDestination(address);
         return point;
       }
     } catch (e) {
@@ -590,6 +620,29 @@ class TruckController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> findNearbyPOIs(LatLng currentPos) async {
+    _isLoadingPOIs = true;
+    notifyListeners();
+
+    try {
+      final pois = await PoiService.fetchPOIsAround(currentPos, radius: 5000); // 5km raio
+      if (pois != null) {
+        _automaticPOIs.clear();
+        _automaticPOIs.addAll(pois);
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar POIs automáticos: \$e');
+    } finally {
+      _isLoadingPOIs = false;
+      notifyListeners();
+    }
+  }
+
+  void clearAutomaticPOIs() {
+    _automaticPOIs.clear();
+    notifyListeners();
   }
 
   @override

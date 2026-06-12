@@ -71,13 +71,13 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
     });
   }
 
-  Future<void> _addStopFromAddress(String address, LatLng userLocation) async {
+  Future<void> _addStopFromAddress(String address, LatLng userLocation, {String? defaultRecipientName}) async {
     setState(() => _isSearching = true);
     final tc = context.read<TruckController>();
     final point = await tc.searchAddress(address, userLocation);
 
     if (point != null) {
-      final controller = TextEditingController();
+      final controller = TextEditingController(text: defaultRecipientName);
       if (!mounted) return;
 
       final name = await showDialog<String>(
@@ -185,6 +185,7 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
     setState(() => _isSearching = true);
     final rawText = await OcrService.instance.extractTextFromImage(image.path);
     final guessedAddress = OcrService.instance.parseAddressFromText(rawText);
+    final guessedName = OcrService.instance.parseClientNameFromText(rawText);
     if (mounted) setState(() => _isSearching = false);
     if (!mounted) return;
 
@@ -238,7 +239,11 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
     );
 
     if (finalAddress != null && finalAddress.trim().isNotEmpty) {
-      _addStopFromAddress(finalAddress.trim(), _currentUserLocation);
+      _addStopFromAddress(
+        finalAddress.trim(),
+        _currentUserLocation,
+        defaultRecipientName: guessedName.isNotEmpty ? guessedName : null,
+      );
     }
   }
 
