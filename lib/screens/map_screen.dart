@@ -61,12 +61,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   LatLngTween? _latLngTween;
   Tween<double>? _rotationTween;
   Tween<double>? _zoomTween;
-  LatLngTween? _vehicleLatLngTween; // Tween para transição suave do veículo
   Animation<double>? _activeAnimation; // Animação ativa com suporte a curvas
   DateTime? _lastGpsUpdateTime; // Timestamp para medir o intervalo real do GPS
   Duration _animationDuration = const Duration(
     milliseconds: 900,
   ); // Duração adaptativa
+
+  // --- Animação dedicada do marcador do veículo (independente da câmera) ---
+  // Separada para que reset() da câmera não cause stuttering no ícone do truck.
+  AnimationController? _vehicleAnimController;
+  LatLngTween? _vehicleLatLngTween;
 
   // --- Heading ---
   final ValueNotifier<double> _headingNotifier = ValueNotifier<double>(0.0);
@@ -96,6 +100,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _isRecalculating = false;
   bool _showReroutingBanner = false;
 
+  // --- Altura atual do NavigationPanel (para evitar sobreposição dos botões) ---
+  // Vai de 0.0 (sem painel) ao fractal do DraggableScrollableSheet
+  final ValueNotifier<double> _panelSizeNotifier = ValueNotifier<double>(0.0);
+
   // ─────────────────────────────────────────────────────────────────────────
   //  CICLO DE VIDA
   // ─────────────────────────────────────────────────────────────────────────
@@ -112,20 +120,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 900),
     );
 
+    // Controller dedicado ao marcador do veículo — completamente independente
+    // da câmera. Nunca sofre reset() abrupto, eliminando o efeito anda-e-para.
+    _vehicleAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _vehicleAnimController!.addListener(() {
+      if (!mounted || _vehicleLatLngTween == null) return;
+      final pos = _vehicleLatLngTween!.evaluate(_vehicleAnimController!);
+      setState(() => _animatedCurrentPosition = pos);
+    });
+
     _cameraAnimationController!.addListener(() {
       if (!mounted || _activeAnimation == null) return;
 
       final anim = _activeAnimation!;
 
-      // Atualiza a posição suavizada do veículo
-      if (_vehicleLatLngTween != null) {
-        final animatedPos = _vehicleLatLngTween!.evaluate(anim);
-        setState(() {
-          _animatedCurrentPosition = animatedPos;
-        });
-      }
-
-      // Se não há interpolação de câmera definida (ex: modo livre), interrompe aqui
+      // Se não há interpolação de câmera definida (ex: modo livre), sai
       if (_latLngTween == null ||
           _rotationTween == null ||
           _zoomTween == null) {
@@ -162,7 +174,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _searchController.dispose();
     _debounce?.cancel();
     _cameraAnimationController?.dispose();
+    _vehicleAnimController?.dispose();
     _headingNotifier.dispose();
+    _panelSizeNotifier.dispose();
     super.dispose();
   }
 
@@ -216,18 +230,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
       if (truckController.isNavigating &&
           truckController.routePoints.isNotEmpty) {
-        LatLng closest = truckController.routePoints.first;
-        double minDist = double.infinity;
-        for (final point in truckController.routePoints) {
-          final d = const Distance().as(LengthUnit.Meter, rawPos, point);
-          if (d < minDist) {
-            minDist = d;
-            closest = point;
-          }
-        }
+        // Projeção no SEGMENTO mais próximo (em vez de vértice mais próximo).
+        // Isso garante movimento suave em curvas, eliminando o efeito de parar/pular.
+        final snapResult = _snapToRouteSegment(rawPos, truckController.routePoints);
+        final minDist = snapResult.$2;
 
         if (minDist < 30) {
-          newPos = closest;
+          newPos = snapResult.$1;
           _offRouteCount = 0;
           truckController.updateCurrentStep(newPos); // avança manobra
         } else if (minDist >= 40) {
@@ -270,8 +279,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _headingNotifier.value = _heading;
       }
 
-      // Prepara interpolação suave da posição do caminhão (marcador)
+      // Interpola suavemente a posição do marcador do veículo.
+      // Captura a posição atualmente renderizada como ponto de partida para
+      // garantir continuidade — sem pulo visual ao interromper animação anterior.
       _vehicleLatLngTween = LatLngTween(begin: oldPos, end: newPos);
+      _vehicleAnimController?.stop();
+      _vehicleAnimController?.duration = _animationDuration;
+      _vehicleAnimController?.value = 0.0;
+      _vehicleAnimController?.forward();
 
       if (_isFollowMode) {
         final double targetZoom;
@@ -513,12 +528,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
     _zoomTween = Tween<double>(begin: startZoom, end: destZoom);
 
-    if (_currentPosition != null) {
-      _vehicleLatLngTween = LatLngTween(
-        begin: _animatedCurrentPosition ?? _currentPosition!,
-        end: _currentPosition!,
-      );
-    }
+    // Nota: veículo é animado pelo _vehicleAnimController — não tocamos aqui.
 
     _activeAnimation = customCurve != null
         ? _cameraAnimationController!.drive(CurveTween(curve: customCurve))
@@ -571,7 +581,48 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return LatLng(newLat * 180 / math.pi, newLon * 180 / math.pi);
   }
 
-  // _snapToRoute foi unificado diretamente no fluxo de atualizações do GPS em _startLocationUpdates
+  /// Projeta [rawPos] no segmento de rota mais próximo e retorna
+  /// (posição projetada, distância ao segmento em metros).
+  /// Produz movimento suave mesmo em curvas porque interpola entre vértices.
+  (LatLng, double) _snapToRouteSegment(LatLng rawPos, List<LatLng> route) {
+    LatLng bestProjection = route.first;
+    double bestDist = double.infinity;
+
+    for (int i = 0; i < route.length - 1; i++) {
+      final a = route[i];
+      final b = route[i + 1];
+
+      // Vetores em graus (suficiente para pequenas distâncias)
+      final ax = a.longitude;
+      final ay = a.latitude;
+      final bx = b.longitude;
+      final by = b.latitude;
+      final px = rawPos.longitude;
+      final py = rawPos.latitude;
+
+      final abx = bx - ax;
+      final aby = by - ay;
+      final len2 = abx * abx + aby * aby;
+
+      double t = 0;
+      if (len2 > 0) {
+        t = ((px - ax) * abx + (py - ay) * aby) / len2;
+        t = t.clamp(0.0, 1.0);
+      }
+
+      final projLat = ay + t * aby;
+      final projLng = ax + t * abx;
+      final proj = LatLng(projLat, projLng);
+
+      final d = const Distance().as(LengthUnit.Meter, rawPos, proj);
+      if (d < bestDist) {
+        bestDist = d;
+        bestProjection = proj;
+      }
+    }
+
+    return (bestProjection, bestDist);
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  BUSCA
@@ -1391,6 +1442,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
 
           // ── PAINEL DE NAVEGAÇÃO ───────────────────────────────────────────
+          // Quando o painel some, zera o notifier para os botões descerem
+          if (tc.routePoints.isEmpty || tc.suggestions.isNotEmpty)
+            Builder(builder: (_) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_panelSizeNotifier.value != 0) _panelSizeNotifier.value = 0;
+              });
+              return const SizedBox.shrink();
+            }),
           if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
             // NavigationPanel é um DraggableScrollableSheet — deve ser filho
             // direto do Stack (sem Positioned) para funcionar corretamente
@@ -1399,6 +1458,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               speed: _lastKnownSpeed,
               onProfileTap: _showTruckProfileSheet,
               onRoutesTap: tc.cycleRoute,
+              onPanelSizeChanged: (size) {
+                _panelSizeNotifier.value = size;
+              },
               onStopsTap: () async {
                 final truckCtrl = context.read<TruckController>();
                 final result = await Navigator.push<List<DeliveryStop>>(
@@ -1468,77 +1530,88 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
 
           // ── BOTÕES LATERAIS ───────────────────────────────────────────────
-          // Botões de zoom: canto ESQUERDO inferior (não colide com nav panel)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
-            left: 16,
-            bottom: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
-                ? (tc.isNavigating ? 160 : 260)
-                : 32,
-            child: Column(
-              children: [
-                _LargeMapButton(
-                  icon: Icons.add_rounded,
-                  onPressed: () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom + 1,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _LargeMapButton(
-                  icon: Icons.remove_rounded,
-                  onPressed: () => _mapController.move(
-                    _mapController.camera.center,
-                    _mapController.camera.zoom - 1,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // Posicionados dinamicamente ACIMA do NavigationPanel usando ValueListenableBuilder
+          ValueListenableBuilder<double>(
+            valueListenable: _panelSizeNotifier,
+            builder: (context, panelSize, child) {
+              final screenH = MediaQuery.of(context).size.height;
+              final panelPixels = panelSize > 0
+                  ? (panelSize * screenH).clamp(0.0, screenH * 0.65)
+                  : 0.0;
+              final buttonBottom = panelPixels + 16;
 
-          // Botões de controle: canto DIREITO inferior
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
-            right: 16,
-            bottom: (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
-                ? (tc.isNavigating ? 160 : 260)
-                : 32,
-            child: Column(
-              children: [
-                _LargeMapButton(
-                  icon: _isFullScreen
-                      ? Icons.fullscreen_exit_rounded
-                      : Icons.fullscreen_rounded,
-                  onPressed: () =>
-                      setState(() => _isFullScreen = !_isFullScreen),
-                ),
-                const SizedBox(height: 10),
-                _LargeMapButton(
-                  icon: _isFollowMode
-                      ? Icons.navigation_rounded
-                      : Icons.my_location_rounded,
-                  isPrimary: _isFollowMode,
-                  onPressed: () {
-                    if (_currentPosition == null) {
-                      _initLocation();
-                      return;
-                    }
-                    setState(() => _isFollowMode = true);
-                    if (tc.isNavigating) {
-                      _moveNavigationCamera(_currentPosition!);
-                    } else {
-                      _animateMapCamera(
-                        _currentPosition!,
-                        -_heading,
-                        _mapController.camera.zoom,
-                      );
-                    }
-                  },
-                ),
-              ],
-            ),
+              return Stack(
+                children: [
+                  // Botões de zoom: canto ESQUERDO
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    left: 16,
+                    bottom: buttonBottom,
+                    child: Column(
+                      children: [
+                        _LargeMapButton(
+                          icon: Icons.add_rounded,
+                          onPressed: () => _mapController.move(
+                            _mapController.camera.center,
+                            _mapController.camera.zoom + 1,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _LargeMapButton(
+                          icon: Icons.remove_rounded,
+                          onPressed: () => _mapController.move(
+                            _mapController.camera.center,
+                            _mapController.camera.zoom - 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Botões de controle: canto DIREITO
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    right: 16,
+                    bottom: buttonBottom,
+                    child: Column(
+                      children: [
+                        _LargeMapButton(
+                          icon: _isFullScreen
+                              ? Icons.fullscreen_exit_rounded
+                              : Icons.fullscreen_rounded,
+                          onPressed: () =>
+                              setState(() => _isFullScreen = !_isFullScreen),
+                        ),
+                        const SizedBox(height: 10),
+                        _LargeMapButton(
+                          icon: _isFollowMode
+                              ? Icons.navigation_rounded
+                              : Icons.my_location_rounded,
+                          isPrimary: _isFollowMode,
+                          onPressed: () {
+                            if (_currentPosition == null) {
+                              _initLocation();
+                              return;
+                            }
+                            setState(() => _isFollowMode = true);
+                            if (tc.isNavigating) {
+                              _moveNavigationCamera(_currentPosition!);
+                            } else {
+                              _animateMapCamera(
+                                _currentPosition!,
+                                -_heading,
+                                _mapController.camera.zoom,
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
 
           // ── LOADING ROTA ──────────────────────────────────────────────────

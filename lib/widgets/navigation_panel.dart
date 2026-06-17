@@ -27,6 +27,7 @@ class NavigationPanel extends StatefulWidget {
     required this.speed,
     required this.onGo,
     required this.onStop,
+    this.onPanelSizeChanged,
     this.onProfileTap,
     this.onRoutesTap,
     this.onStopsTap,
@@ -39,6 +40,9 @@ class NavigationPanel extends StatefulWidget {
   final double speed;
   final VoidCallback onGo;
   final VoidCallback onStop;
+  /// Callback chamado sempre que o tamanho do painel muda (0.0 – 1.0).
+  /// Permite que a tela pai posicione botões acima do painel.
+  final ValueChanged<double>? onPanelSizeChanged;
   final VoidCallback? onProfileTap;
   final VoidCallback? onRoutesTap;
   final VoidCallback? onStopsTap;
@@ -70,7 +74,25 @@ class _NavigationPanelState extends State<NavigationPanel> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _sheetController.addListener(_onSheetSizeChanged);
+    // Reporta o tamanho inicial após o primeiro frame (sheet já attached)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _sheetController.isAttached) {
+        widget.onPanelSizeChanged?.call(_sheetController.size);
+      }
+    });
+  }
+
+  void _onSheetSizeChanged() {
+    if (!_sheetController.isAttached) return;
+    widget.onPanelSizeChanged?.call(_sheetController.size);
+  }
+
+  @override
   void dispose() {
+    _sheetController.removeListener(_onSheetSizeChanged);
     _sheetController.dispose();
     super.dispose();
   }
