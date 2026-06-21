@@ -250,20 +250,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final speed = _safeSpeed(position);
 
       // --- Cálculo da Duração Dinâmica Adaptativa ---
+      // Limitada a 600ms para que updates de 1m pareçam fluídos.
       final now = DateTime.now();
       if (_lastGpsUpdateTime != null) {
         final elapsed = now.difference(_lastGpsUpdateTime!);
-        if (elapsed.inMilliseconds >= 300 && elapsed.inMilliseconds <= 2000) {
+        if (elapsed.inMilliseconds >= 200 && elapsed.inMilliseconds <= 2000) {
           _animationDuration = Duration(
-            milliseconds: (elapsed.inMilliseconds * 0.85).round(),
+            milliseconds: (elapsed.inMilliseconds * 0.85).clamp(200, 600).round(),
           );
         } else {
-          _animationDuration = const Duration(milliseconds: 900);
+          _animationDuration = const Duration(milliseconds: 600);
         }
       }
       _lastGpsUpdateTime = now;
 
-      final oldPos = _animatedCurrentPosition ?? _currentPosition ?? newPos;
+      // Captura PRIMEIRO a posição visualmente renderizada (antes de qualquer setState)
+      // para que o novo tween comece exatamente onde a seta está na tela agora.
+      final livePos = _animatedCurrentPosition ?? _currentPosition ?? newPos;
 
       setState(() {
         _currentPosition = newPos;
@@ -279,14 +282,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _headingNotifier.value = _heading;
       }
 
-      // Interpola suavemente a posição do marcador do veículo.
-      // Captura a posição atualmente renderizada como ponto de partida para
-      // garantir continuidade — sem pulo visual ao interromper animação anterior.
-      _vehicleLatLngTween = LatLngTween(begin: oldPos, end: newPos);
-      _vehicleAnimController?.stop();
+      // Animação contínua do marcador do veículo:
+      // Usamos forward(from: 0) que interrompe internamente qualquer animação
+      // anterior SEM chamar stop() antes — isso evita o frame de freeze que
+      // acontecia quando stop() zerava a posição antes do novo tween ser definido.
+      _vehicleLatLngTween = LatLngTween(begin: livePos, end: newPos);
       _vehicleAnimController?.duration = _animationDuration;
-      _vehicleAnimController?.value = 0.0;
-      _vehicleAnimController?.forward();
+      _vehicleAnimController?.forward(from: 0.0);
 
       if (_isFollowMode) {
         final double targetZoom;
@@ -500,9 +502,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       destCenter,
     );
 
-    if (distance < 0.5 &&
-        (destRotation - startRotation).abs() < 1.5 &&
-        (destZoom - startZoom).abs() < 0.05) {
+    // Threshold reduzido para 0.1m para não bloquear movimento em baixa velocidade.
+    if (distance < 0.1 &&
+        (destRotation - startRotation).abs() < 0.5 &&
+        (destZoom - startZoom).abs() < 0.02) {
       return;
     }
 
@@ -634,7 +637,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final text = _searchController.text;
       final tc = context.read<TruckController>();
       if (text.isNotEmpty) {
-        tc.fetchSuggestions(text);
+        tc.fetchSuggestions(text, userLocation: _currentPosition);
       } else {
         tc.clearSuggestions();
       }
@@ -718,7 +721,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
       if (address.isNotEmpty && mounted) {
         _searchController.text = address;
-        context.read<TruckController>().fetchSuggestions(address);
+        context.read<TruckController>().fetchSuggestions(address, userLocation: _currentPosition);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

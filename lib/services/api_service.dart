@@ -12,8 +12,8 @@ class ApiService {
 
   static String get baseUrl {
     if (kIsWeb) return 'http://127.0.0.1:3000/api';
-    if (Platform.isAndroid || Platform.isIOS) return 'http://192.168.1.9:3000/api';
-    return 'http://127.0.0.1:3000/api';
+    if (Platform.isAndroid || Platform.isIOS) return 'https://api.trall.jalsl.com/api';
+    return 'https://api.trall.jalsl.com/api';
   }
 
   int? _userId;
@@ -22,10 +22,30 @@ class ApiService {
   Future<void> init() async {
     _userId = PreferencesService.instance.prefs.getInt('userId');
     
+    await testConnection();
+    
     if (_userId == null) {
       await _registerGhostUser();
     } else {
       debugPrint('Usuário já logado com ID: $_userId');
+    }
+  }
+
+  Future<bool> testConnection() async {
+    try {
+      debugPrint('Testando conexão com a API em: $baseUrl/health');
+      final response = await http.get(Uri.parse('$baseUrl/health'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        debugPrint('✅ Conexão com API bem-sucedida! Retorno: ${data['message']}');
+        return true;
+      } else {
+        debugPrint('❌ Falha na conexão com a API. Status: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Erro de conexão com a API: $e');
+      return false;
     }
   }
 
@@ -79,7 +99,10 @@ class ApiService {
   }
 
   Future<bool> postAlert(TruckerMarker marker) async {
-    if (_userId == null) return false;
+    if (_userId == null) {
+      debugPrint('Erro ao postar alerta: _userId está nulo!');
+      return false;
+    }
 
     try {
       final response = await http.post(
@@ -94,7 +117,12 @@ class ApiService {
         }),
       );
 
-      return response.statusCode == 201;
+      if (response.statusCode == 201) {
+        return true;
+      } else {
+        debugPrint('Falha ao postar alerta. Código de status: ${response.statusCode}, Corpo: ${response.body}');
+        return false;
+      }
     } catch (e) {
       debugPrint('Erro ao postar alerta: $e');
       return false;

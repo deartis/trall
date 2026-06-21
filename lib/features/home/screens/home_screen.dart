@@ -49,18 +49,9 @@ class _DashboardSheet extends StatefulWidget {
 }
 
 class _DashboardSheetState extends State<_DashboardSheet> {
-  final TextEditingController _searchCtrl = TextEditingController();
-  bool _isSearching = false;
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
 
   Future<void> _searchAndGo(String address) async {
     if (address.trim().isEmpty) return;
-    setState(() => _isSearching = true);
     FocusScope.of(context).unfocus();
 
     LatLng startLoc = const LatLng(-22.9068, -43.1729);
@@ -75,7 +66,6 @@ class _DashboardSheetState extends State<_DashboardSheet> {
     if (mounted) {
       await truckCtrl.searchAddress(address, startLoc);
     }
-    if (mounted) setState(() => _isSearching = false);
   }
 
   @override
@@ -129,14 +119,6 @@ class _DashboardSheetState extends State<_DashboardSheet> {
               _ProfileCard(profile: profile),
               const SizedBox(height: 16),
 
-              // ── Campo de busca rápida ─────────────────────────────
-              _SearchField(
-                controller: _searchCtrl,
-                isLoading: _isSearching,
-                onSubmit: _searchAndGo,
-              ),
-              const SizedBox(height: 8),
-
               // ── Botão de paradas da rota ──────────────────────────
               _StopsButton(
                 hasActiveRoute: tc.deliveryStops.isNotEmpty,
@@ -171,7 +153,6 @@ class _DashboardSheetState extends State<_DashboardSheet> {
               // ── Destinos recentes ─────────────────────────────────
               RecentDestinations(
                 onTap: (address) {
-                  _searchCtrl.text = address;
                   _searchAndGo(address);
                 },
               ),
@@ -327,84 +308,7 @@ class _ProfileCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Campo de busca rápida no dashboard
-// ─────────────────────────────────────────────────────────────
-class _SearchField extends StatelessWidget {
-  const _SearchField({
-    required this.controller,
-    required this.isLoading,
-    required this.onSubmit,
-  });
 
-  final TextEditingController controller;
-  final bool isLoading;
-  final void Function(String) onSubmit;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1D26),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.search_rounded, color: Colors.blueAccent, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              decoration: InputDecoration(
-                hintText: 'Para onde vamos, motorista?',
-                hintStyle: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  fontSize: 15,
-                ),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onSubmitted: onSubmit,
-            ),
-          ),
-          if (isLoading)
-            const SizedBox(
-              width: 18, height: 18,
-              child: CircularProgressIndicator(
-                color: Colors.blueAccent, strokeWidth: 2,
-              ),
-            )
-          else
-            GestureDetector(
-              onTap: () => onSubmit(controller.text),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2563EB),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Text(
-                  'IR',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 //  Card de resumo de fadiga
