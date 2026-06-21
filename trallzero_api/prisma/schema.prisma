@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum para travar os tipos de alertas
+enum AlertType {
+  MAX_HEIGHT      // Altura máxima permitida
+  LOAD_UNLOAD     // Local de Carga e Descarga
+  PROHIBITED_AREA // Área/Via proibida para caminhões
+  HILL            // Morro perigoso/íngreme
+  RISK_AREA       // Área de risco (assaltos, acidentes)
+  WEIGH_STATION   // Balança
+  POLICE          // Polícia Rodoviária
+  NARROW_STREET   // Rua estreita
+  OTHER           // Outros
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  alerts      Alert[]
+  validations Validation[]
+  routes      Route[]
+}
+
+model Alert {
+  id          Int       @id @default(autoincrement())
+  type        AlertType
+  latitude    Float
+  longitude   Float
+  description String?
+  createdAt   DateTime  @default(now())
+
+  // Relacionamento com o criador (User)
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  // Relacionamento com as validações
+  validations Validation[]
+}
+
+model Validation {
+  id        Int      @id @default(autoincrement())
+  isHelpful Boolean  // true = Confirmo a informação, false = Informação falsa/desatualizada
+  createdAt DateTime @default(now())
+
+  // Quem votou
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  // Qual alerta foi votado
+  alertId Int
+  alert   Alert @relation(fields: [alertId], references: [id])
+
+  // Um usuário só pode votar uma vez por alerta
+  @@unique([userId, alertId])
+}
+
+model Route {
+  id        Int        @id @default(autoincrement())
+  name      String?
+  truckType String     @default("truck")
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  userId Int
+  user   User        @relation(fields: [userId], references: [id])
+  stops  RouteStop[]
+}
+
+model RouteStop {
+  id            Int     @id @default(autoincrement())
+  order         Int
+  recipientName String
+  address       String
+  lat           Float
+  lng           Float
+  isCompleted   Boolean @default(false)
+
+  routeId Int
+  route   Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+}
