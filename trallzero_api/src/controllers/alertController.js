@@ -116,3 +116,21 @@ export const validateAlert = async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   }
 };
+
+// Excluir um alerta (e suas validações em cascata)
+export const deleteAlert = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const alertId = parseInt(id);
+
+    // Deleta as validações antes (FK constraint)
+    await prisma.validation.deleteMany({ where: { alertId } });
+
+    await prisma.alert.delete({ where: { id: alertId } });
+
+    res.status(200).json({ success: true, message: 'Alerta excluído.' });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+

@@ -409,11 +409,15 @@ class TruckController extends ChangeNotifier {
 
   Future<void> removeMarker(String id) async {
     try {
-      // Como não temos delete na API ainda, deletamos só localmente
-      _customMarkers.removeWhere((m) => m.id == id);
-      notifyListeners();
+      final success = await ApiService.instance.deleteAlert(id);
+      if (success) {
+        _customMarkers.removeWhere((m) => m.id == id);
+        notifyListeners();
+      } else {
+        debugPrint('Erro: API não confirmou a exclusão do marcador $id');
+      }
     } catch (e) {
-      debugPrint('Erro ao deletar marcador local: $e');
+      debugPrint('Erro ao deletar marcador: $e');
     }
   }
 

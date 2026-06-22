@@ -31,6 +31,7 @@ dependencies:
   google_fonts: ^6.2.1
   share_plus: ^10.1.2
   google_sign_in: ^6.2.1
+  wakelock_plus: ^1.5.2
 
 dev_dependencies:
   flutter_test:

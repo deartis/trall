@@ -134,6 +134,18 @@ class ApiService {
     }
   }
 
+  Future<bool> deleteAlert(String id) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/alerts/$id'),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Erro ao excluir alerta: $e');
+      return false;
+    }
+  }
+
   // ── ROTAS ────────────────────────────────────────────────────────────────
 
   /// Salva (ou substitui) a rota ativa do usuário no banco.
@@ -215,6 +227,7 @@ class ApiService {
       case 'RISK_AREA': return MarkerType.danger;
       case 'PROHIBITED_AREA': return MarkerType.danger;
       case 'HILL': return MarkerType.danger;
+      case 'LOAD_UNLOAD': return MarkerType.loading;
       case 'GAS_STATION': return MarkerType.gasStation;
       case 'MECHANIC': return MarkerType.mechanic;
       case 'RESTAURANT': return MarkerType.restaurant;

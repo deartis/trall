@@ -17,6 +17,9 @@ enum AlertType {
   WEIGH_STATION   // Balança
   POLICE          // Polícia Rodoviária
   NARROW_STREET   // Rua estreita
+  GAS_STATION     // Posto de combustível
+  MECHANIC        // Oficina mecânica
+  RESTAURANT      // Restaurante / Parada
   OTHER           // Outros
 }
 

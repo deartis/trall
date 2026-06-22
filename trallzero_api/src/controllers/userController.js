@@ -35,3 +35,30 @@ export const getUsers = async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   }
 };
+
+// Login ou cadastro via Google (upsert pelo email)
+export const googleLogin = async (req, res) => {
+  try {
+    const { googleId, email, name } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'email é obrigatório' });
+    }
+
+    // Cria se não existe, retorna se já existe
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: { name: name ?? email }, // Atualiza nome se mudou
+      create: {
+        name: name ?? email,
+        email,
+        password: googleId ?? 'google-oauth', // Senha dummy, não usada com OAuth
+      },
+    });
+
+    res.status(200).json({ success: true, data: user });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+};
+

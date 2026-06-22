@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:math' as math;
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter/material.dart';
@@ -89,6 +90,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _isFollowMode = true;
   bool _isFullScreen = false;
 
+  // --- Zoom atual (para ocultar marcadores no zoom out) ---
+  double _currentZoom = 13.0;
+  static const double _markerVisibilityZoom = 12.0;
+
   // --- OCR ---
   bool _isOcrLoading = false;
 
@@ -111,6 +116,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+
+    // Mantém a tela acesa enquanto o GPS estiver ativo
+    WakelockPlus.enable();
 
     _searchController.addListener(_onSearchChanged);
 
@@ -167,6 +175,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    WakelockPlus.disable(); // Libera o wakelock ao sair da tela
     _positionStream?.cancel();
     _compassStream?.cancel();
     _compassCheckTimer?.cancel();
@@ -1059,6 +1068,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     setState(() => _isFollowMode = false);
                     _cameraAnimationController?.stop();
                   }
+                  // Atualiza zoom para controlar visibilidade dos marcadores
+                  final zoom = event.camera.zoom;
+                  if ((zoom - _currentZoom).abs() > 0.15) {
+                    setState(() => _currentZoom = zoom);
+                  }
                 },
                 onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
                 onLongPress: (_, point) => _showAddMarkerDialog(point),
@@ -1146,31 +1160,82 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     );
                   }),
                   ...[...tc.customMarkers, ...tc.automaticPOIs].map(
-                    (m) => Marker(
-                      point: m.position,
-                      width: 44,
-                      height: 44,
-                      rotate: true,
-                      child: GestureDetector(
-                        onTap: () => _showMarkerDetailSheet(m),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: _markerColor(m.type).withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _markerColor(
-                                m.type,
-                              ).withValues(alpha: 0.5),
+                    (m) {
+                      final color = _markerColor(m.type);
+                      final label = _markerLabel(m.type);
+                      return Marker(
+                        point: m.position,
+                        width: 84,
+                        height: 72,
+                        rotate: true,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 250),
+                          opacity: _currentZoom >= _markerVisibilityZoom ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: _currentZoom < _markerVisibilityZoom,
+                            child: GestureDetector(
+                              onTap: () => _showMarkerDetailSheet(m),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // ── Ícone ──
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.18),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: color.withValues(alpha: 0.55),
+                                        width: 1.5,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: color.withValues(alpha: 0.25),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      _markerIcon(m.type),
+                                      color: color,
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  // ── Label ──
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0B0E17)
+                                          .withValues(alpha: 0.82),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: color.withValues(alpha: 0.3),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      label,
+                                      style: TextStyle(
+                                        color: color,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.3,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          child: Icon(
-                            _markerIcon(m.type),
-                            color: _markerColor(m.type),
-                            size: 22,
-                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
                 ],
               ),
