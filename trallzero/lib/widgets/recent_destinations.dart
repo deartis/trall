@@ -92,25 +92,11 @@ class _RecentDestinationsState extends State<RecentDestinations> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(0, 16, 0, 8),
-          child: Text(
-            'DESTINOS RECENTES',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.3),
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
-            ),
-          ),
-        ),
-        ..._entries.map((entry) => _RecentTile(
-          entry: entry,
-          timeLabel: _timeLabel(entry.timestamp),
-          onTap: () => widget.onTap(entry.address),
-        )),
-      ],
+      children: _entries.map((entry) => _RecentTile(
+        entry: entry,
+        timeLabel: _timeLabel(entry.timestamp),
+        onTap: () => widget.onTap(entry.address),
+      )).toList(),
     );
   }
 }

@@ -24,6 +24,7 @@ class ProactiveAlertHud extends StatelessWidget {
     MarkerType.restriction,
     MarkerType.danger,
     MarkerType.police,
+    MarkerType.speedCamera,
   ];
 
   static const _alertRangeMeters = 5000.0;
@@ -210,6 +211,7 @@ class ProactiveAlertHud extends StatelessWidget {
     MarkerType.restriction  => '🚫  Restrição à frente',
     MarkerType.danger       => '⚠️  Perigo à frente',
     MarkerType.police       => '🚔  Fiscalização à frente',
+    MarkerType.speedCamera  => '📸  Radar à frente',
     _                       => 'Alerta à frente',
   };
 
@@ -218,6 +220,7 @@ class ProactiveAlertHud extends StatelessWidget {
     MarkerType.restriction  => Icons.block_rounded,
     MarkerType.danger       => Icons.warning_rounded,
     MarkerType.police       => Icons.local_police_rounded,
+    MarkerType.speedCamera  => Icons.camera_alt_rounded,
     _                       => Icons.info_rounded,
   };
 
@@ -226,6 +229,7 @@ class ProactiveAlertHud extends StatelessWidget {
     MarkerType.restriction  => const Color(0xFFFF3B30),
     MarkerType.danger       => const Color(0xFFFF3B30),
     MarkerType.police       => const Color(0xFF1E90FF),
+    MarkerType.speedCamera  => const Color(0xFF00C7FF),
     _                       => const Color(0xFF8E8E93),
   };
 }

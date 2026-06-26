@@ -518,8 +518,8 @@ class TruckController extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchRoute(LatLng start) async {
-    if (_deliveryStops.isEmpty) return;
+  Future<bool> fetchRoute(LatLng start) async {
+    if (_deliveryStops.isEmpty) return false;
 
     _isRouting = true;
     notifyListeners();
@@ -590,10 +590,13 @@ class TruckController extends ChangeNotifier {
           _selectedRouteIndex = 0;
           
           _updateActiveRouteFields();
+          return true;
         }
       }
+      return false;
     } catch (e) {
       debugPrint('Erro ao buscar rotas: $e');
+      return false;
     } finally {
       _isRouting = false;
       notifyListeners();

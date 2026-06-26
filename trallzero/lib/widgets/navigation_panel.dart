@@ -7,7 +7,6 @@ import 'package:share_plus/share_plus.dart';
 import '../core/app_colors.dart';
 import '../controllers/truck_controller.dart';
 import 'avoid_options_sheet.dart';
-import '../screens/settings_screen.dart';
 import 'route_risk_bar.dart';
 import '../models/road_analysis.dart';
 
@@ -357,10 +356,9 @@ class _NavigationPanelState extends State<NavigationPanel> {
                             label: 'Ajustes',
                             color: AppColors.textMuted,
                             onTap: () {
-                              Navigator.push(
+                              Navigator.pushNamed(
                                 context,
-                                MaterialPageRoute(
-                                    builder: (_) => const SettingsScreen()),
+                                '/settings',
                               );
                             },
                           ),

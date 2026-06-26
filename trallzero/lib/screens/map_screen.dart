@@ -22,7 +22,7 @@ import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
 import '../widgets/navigation_panel.dart';
 import '../features/route/models/delivery_stop.dart';
-import '../features/route/screens/route_manager_screen.dart';
+
 
 
 // ============================================================
@@ -247,12 +247,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         // Isso garante movimento suave em curvas, eliminando o efeito de parar/pular.
         final snapResult = _snapToRouteSegment(rawPos, truckController.routePoints);
         final minDist = snapResult.$2;
+        const double snappingThreshold = 35.0;
 
-        if (minDist < 30) {
+        if (minDist < snappingThreshold) {
           newPos = snapResult.$1;
           _offRouteCount = 0;
           truckController.updateCurrentStep(newPos); // avança manobra
-        } else if (minDist >= 40) {
+        } else {
           if (position.accuracy <= 20.0) {
             _offRouteCount++;
             if (_offRouteCount >= 3 && !_isRecalculating) {
@@ -360,7 +361,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     });
 
     try {
-      await tc.fetchRoute(rawPos);
+      final success = await tc.fetchRoute(rawPos);
+      if (!success && mounted) {
+        showStyledSnackBar(
+          context: context,
+          message: 'Falha ao recalcular rota automática.',
+          isError: true,
+        );
+      }
     } catch (e) {
       debugPrint('[Rerouting] Erro no recálculo automático: $e');
     } finally {
@@ -859,6 +867,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 letterSpacing: 1.8,
               ),
             ),
+            const SizedBox(height: 6),
+            Text(
+              'O alerta será salvo na sua localização atual no mapa',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             const SizedBox(height: 20),
             // Grade 2 colunas — botões grandes para dedão com luva
             GridView.count(
@@ -1018,7 +1036,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   Color _markerColor(MarkerType t) => switch (t) {
     MarkerType.loading => const Color(0xFF34C759),
-    MarkerType.unloading => const Color(0xFF007AFF),
     MarkerType.restriction => const Color(0xFFFF3B30),
     MarkerType.weighStation => const Color(0xFFFF9500),
     MarkerType.parking => const Color(0xFFAF52DE),
@@ -1027,12 +1044,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.gasStation => const Color(0xFFF59E0B),
     MarkerType.mechanic => const Color(0xFF6B7280),
     MarkerType.restaurant => const Color(0xFFEC4899),
+    MarkerType.speedCamera => const Color(0xFF00C7FF),
     MarkerType.other => const Color(0xFF8E8E93),
   };
 
   IconData _markerIcon(MarkerType t) => switch (t) {
-    MarkerType.loading => Icons.file_download_rounded,
-    MarkerType.unloading => Icons.file_upload_rounded,
+    MarkerType.loading => Icons.import_export_rounded,
     MarkerType.restriction => Icons.block_rounded,
     MarkerType.weighStation => Icons.scale_rounded,
     MarkerType.parking => Icons.local_parking_rounded,
@@ -1041,12 +1058,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.gasStation => Icons.local_gas_station_rounded,
     MarkerType.mechanic => Icons.build_circle_rounded,
     MarkerType.restaurant => Icons.restaurant_rounded,
+    MarkerType.speedCamera => Icons.camera_alt_rounded,
     MarkerType.other => Icons.info_rounded,
   };
 
   String _markerLabel(MarkerType t) => switch (t) {
-    MarkerType.loading => 'Carga',
-    MarkerType.unloading => 'Descarga',
+    MarkerType.loading => 'Carga/Descarga',
     MarkerType.restriction => 'Restrição',
     MarkerType.weighStation => 'Balança',
     MarkerType.parking => 'Pátio',
@@ -1055,6 +1072,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     MarkerType.gasStation => 'Posto',
     MarkerType.mechanic => 'Mecânica',
     MarkerType.restaurant => 'Parada',
+    MarkerType.speedCamera => 'Radar',
     MarkerType.other => 'Outros',
   };
 
@@ -1093,7 +1111,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   }
                 },
                 onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
-                onLongPress: (_, point) => _showAddMarkerDialog(point),
               ),
               children: [
               ColorFiltered(
@@ -1153,6 +1170,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       child: NavigationMarker(
                         speed: _lastKnownSpeed,
                         profileType: tc.truckProfile.type,
+                        heading: _heading,
                       ),
                     ),
                   ...tc.deliveryStops.asMap().entries.map((entry) {
@@ -1587,11 +1605,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               },
               onStopsTap: () async {
                 final truckCtrl = context.read<TruckController>();
-                final result = await Navigator.push<List<DeliveryStop>>(
+                final result = await Navigator.pushNamed<List<DeliveryStop>>(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const RouteManagerScreen(),
-                  ),
+                  '/route_manager',
                 );
 
                 if (result != null && mounted) {
@@ -1725,6 +1741,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     bottom: buttonBottom,
                     child: Column(
                       children: [
+                        _LargeMapButton(
+                          icon: Icons.add_location_alt_rounded,
+                          isPrimary: true,
+                          onPressed: () {
+                            _showAddMarkerDialog(_currentPosition ?? _mapController.camera.center);
+                          },
+                        ),
+                        const SizedBox(height: 10),
                         _LargeMapButton(
                           icon: _isFullScreen
                               ? Icons.fullscreen_exit_rounded

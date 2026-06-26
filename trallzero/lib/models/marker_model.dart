@@ -2,7 +2,6 @@ import 'package:latlong2/latlong.dart';
 
 enum MarkerType {
   loading,
-  unloading,
   restriction,
   weighStation,
   parking,
@@ -11,6 +10,7 @@ enum MarkerType {
   gasStation,
   mechanic,
   restaurant,
+  speedCamera,
   other
 }
 

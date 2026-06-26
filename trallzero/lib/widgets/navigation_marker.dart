@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
 import '../models/truck_profile.dart';
@@ -6,12 +7,14 @@ class NavigationMarker extends StatefulWidget {
   final double size;
   final double speed; // em m/s
   final TruckProfileType profileType;
+  final double heading; // em graus
 
   const NavigationMarker({
     super.key,
     this.size = 40,
     this.speed = 0.0,
     this.profileType = TruckProfileType.truck,
+    this.heading = 0.0,
   });
 
   @override
@@ -77,60 +80,64 @@ class _NavigationMarkerState extends State<NavigationMarker>
   Widget build(BuildContext context) {
     final size = widget.size;
     final color = _markerColor;
+    final headingRad = widget.heading * math.pi / 180.0;
 
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Anel pulsante externo
-          AnimatedBuilder(
-            animation: _pulseController,
-            builder: (context, child) => Transform.scale(
-              scale: _scaleAnimation.value,
-              child: Opacity(
-                opacity: _opacityAnimation.value,
-                child: Container(
-                  width: size * 0.55,
-                  height: size * 0.55,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: color,
-                      width: 2,
+      child: Transform.rotate(
+        angle: headingRad,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Anel pulsante externo
+            AnimatedBuilder(
+              animation: _pulseController,
+              builder: (context, child) => Transform.scale(
+                scale: _scaleAnimation.value,
+                child: Opacity(
+                  opacity: _opacityAnimation.value,
+                  child: Container(
+                    width: size * 0.55,
+                    height: size * 0.55,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: color,
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // Efeito de brilho/aura ao fundo
-          Container(
-            width: size * 0.8,
-            height: size * 0.8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.4),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                ),
-              ],
+            // Efeito de brilho/aura ao fundo
+            Container(
+              width: size * 0.8,
+              height: size * 0.8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.4),
+                    blurRadius: 15,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
             ),
-          ),
 
-          // O Veículo Estilizado (Custom Painter)
-          CustomPaint(
-            size: Size(size * 0.6, size * 0.8),
-            painter: _VehiclePainter(
-              color: color,
-              profileType: widget.profileType,
+            // O Veículo Estilizado (Custom Painter)
+            CustomPaint(
+              size: Size(size * 0.65, size * 0.85),
+              painter: _VehiclePainter(
+                color: color,
+                profileType: widget.profileType,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -152,7 +159,7 @@ class _VehiclePainter extends CustomPainter {
     final borderPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.8)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6;
+      ..strokeWidth = 1.5;
 
     final detailPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.35)
@@ -181,165 +188,156 @@ class _VehiclePainter extends CustomPainter {
     }
   }
 
+  void _drawCab(Canvas canvas, double x, double y, double w, double h, Paint paint, Paint borderPaint) {
+    // A rounded rectangle representing the cabin
+    final RRect cabRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x, y, w, h),
+      Radius.circular(w * 0.25),
+    );
+    canvas.drawRRect(cabRRect, paint);
+    canvas.drawRRect(cabRRect, borderPaint);
+
+    // Windshield (Para-brisa)
+    final glassPaint = Paint()
+      ..color = const Color(0xFF8CE3FF)
+      ..style = PaintingStyle.fill;
+    final glassBorder = Paint()
+      ..color = Colors.white.withValues(alpha: 0.6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8;
+    
+    // Windshield at the top/front of the cab
+    final RRect glassRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x + w * 0.15, y + h * 0.12, w * 0.7, h * 0.22),
+      Radius.circular(w * 0.08),
+    );
+    canvas.drawRRect(glassRRect, glassPaint);
+    canvas.drawRRect(glassRRect, glassBorder);
+
+    // Side mirrors (Retrovisores)
+    final mirrorPaint = Paint()
+      ..color = paint.color
+      ..style = PaintingStyle.fill;
+    
+    // Left mirror
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - w * 0.12, y + h * 0.25, w * 0.1, h * 0.22),
+        const Radius.circular(1),
+      ),
+      mirrorPaint,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x - w * 0.12, y + h * 0.25, w * 0.1, h * 0.22),
+        const Radius.circular(1),
+      ),
+      borderPaint,
+    );
+
+    // Right mirror
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x + w * 1.02, y + h * 0.25, w * 0.1, h * 0.22),
+        const Radius.circular(1),
+      ),
+      mirrorPaint,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(x + w * 1.02, y + h * 0.25, w * 0.1, h * 0.22),
+        const Radius.circular(1),
+      ),
+      borderPaint,
+    );
+  }
+
+  void _drawTrailer(Canvas canvas, double x, double y, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
+    final RRect trailerRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x, y, w, h),
+      Radius.circular(w * 0.1),
+    );
+    canvas.drawRRect(trailerRRect, paint);
+    canvas.drawRRect(trailerRRect, borderPaint);
+
+    // Corrugated container ridges (linhas horizontais de detalhe em vista superior)
+    final double step = h / 5;
+    for (double i = y + step; i < y + h - 1; i += step) {
+      canvas.drawLine(Offset(x + 2, i), Offset(x + w - 2, i), detailPaint);
+    }
+  }
+
   void _drawLightTruck(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    final path = Path();
-    path.moveTo(w / 2, 0); // Ponta superior
-    path.lineTo(w * 0.8, h * 0.3); // Canto direito cabine
-    path.lineTo(w * 0.7, h * 0.3);
-    path.lineTo(w * 0.7, h * 0.85); // Traseira direita
-    path.lineTo(w * 0.3, h * 0.85); // Traseira esquerda
-    path.lineTo(w * 0.3, h * 0.3);
-    path.lineTo(w * 0.2, h * 0.3);
-    path.close();
-
-    canvas.drawPath(path, paint);
-    canvas.drawPath(path, borderPaint);
-
-    // Divisor cabine/caçamba
-    canvas.drawLine(Offset(w * 0.3, h * 0.36), Offset(w * 0.7, h * 0.36), detailPaint);
+    _drawCab(canvas, w * 0.18, 0, w * 0.64, h * 0.38, paint, borderPaint);
+    _drawTrailer(canvas, w * 0.18, h * 0.42, w * 0.64, h * 0.55, paint, borderPaint, detailPaint);
   }
 
   void _drawRigidTruck(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    final path = Path();
-    path.moveTo(w / 2, 0);
-    path.lineTo(w * 0.85, h * 0.25);
-    path.lineTo(w * 0.75, h * 0.25);
-    path.lineTo(w * 0.75, h * 0.92);
-    path.lineTo(w * 0.25, h * 0.92);
-    path.lineTo(w * 0.25, h * 0.25);
-    path.lineTo(w * 0.15, h * 0.25);
-    path.close();
-
-    canvas.drawPath(path, paint);
-    canvas.drawPath(path, borderPaint);
-
-    // Divisor cabine/baú
-    canvas.drawLine(Offset(w * 0.25, h * 0.32), Offset(w * 0.75, h * 0.32), detailPaint);
+    _drawCab(canvas, w * 0.16, 0, w * 0.68, h * 0.34, paint, borderPaint);
+    _drawTrailer(canvas, w * 0.16, h * 0.38, w * 0.68, h * 0.58, paint, borderPaint, detailPaint);
   }
 
   void _drawCarreta(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cabine (Cavalo Mecânico)
-    final cabPath = Path();
-    cabPath.moveTo(w / 2, 0);
-    cabPath.lineTo(w * 0.85, h * 0.22);
-    cabPath.lineTo(w * 0.7, h * 0.22);
-    cabPath.lineTo(w * 0.7, h * 0.28);
-    cabPath.lineTo(w * 0.3, h * 0.28);
-    cabPath.lineTo(w * 0.3, h * 0.22);
-    cabPath.lineTo(w * 0.15, h * 0.22);
-    cabPath.close();
+    // Cavalo mecânico
+    _drawCab(canvas, w * 0.2, 0, w * 0.6, h * 0.28, paint, borderPaint);
 
-    canvas.drawPath(cabPath, paint);
-    canvas.drawPath(cabPath, borderPaint);
-
-    // Pino de engate (quinta roda)
-    final pinPaint = Paint()
+    // Pino de engate (chassis)
+    final chassisPaint = Paint()
       ..color = borderPaint.color.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
-    canvas.drawLine(Offset(w / 2, h * 0.28), Offset(w / 2, h * 0.38), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.28), Offset(w / 2, h * 0.38), chassisPaint);
 
-    // Semirreboque longo
-    final RRect trailer = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.20, h * 0.38, w * 0.80, h * 0.95),
-      const Radius.circular(3),
-    );
-    canvas.drawRRect(trailer, paint);
-    canvas.drawRRect(trailer, borderPaint);
+    // Semirreboque
+    _drawTrailer(canvas, w * 0.16, h * 0.38, w * 0.68, h * 0.58, paint, borderPaint, detailPaint);
   }
 
   void _drawBitrem(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cabine
-    final cabPath = Path();
-    cabPath.moveTo(w / 2, 0);
-    cabPath.lineTo(w * 0.8, h * 0.18);
-    cabPath.lineTo(w * 0.7, h * 0.18);
-    cabPath.lineTo(w * 0.7, h * 0.23);
-    cabPath.lineTo(w * 0.3, h * 0.23);
-    cabPath.lineTo(w * 0.3, h * 0.18);
-    cabPath.lineTo(w * 0.2, h * 0.18);
-    cabPath.close();
-    canvas.drawPath(cabPath, paint);
-    canvas.drawPath(cabPath, borderPaint);
+    // Cavalo mecânico
+    _drawCab(canvas, w * 0.22, 0, w * 0.56, h * 0.22, paint, borderPaint);
 
-    // Pino 1
-    final pinPaint = Paint()
+    // Pino 1 (chassis)
+    final chassisPaint = Paint()
       ..color = borderPaint.color.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.8;
-    canvas.drawLine(Offset(w / 2, h * 0.23), Offset(w / 2, h * 0.30), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.22), Offset(w / 2, h * 0.28), chassisPaint);
 
-    // Semirreboque 1
-    final RRect trailer1 = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.22, h * 0.30, w * 0.78, h * 0.58),
-      const Radius.circular(2),
-    );
-    canvas.drawRRect(trailer1, paint);
-    canvas.drawRRect(trailer1, borderPaint);
+    // Reboque 1
+    _drawTrailer(canvas, w * 0.18, h * 0.28, w * 0.64, h * 0.31, paint, borderPaint, detailPaint);
 
     // Pino 2
-    canvas.drawLine(Offset(w / 2, h * 0.58), Offset(w / 2, h * 0.65), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.59), Offset(w / 2, h * 0.64), chassisPaint);
 
-    // Semirreboque 2
-    final RRect trailer2 = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.22, h * 0.65, w * 0.78, h * 0.95),
-      const Radius.circular(2),
-    );
-    canvas.drawRRect(trailer2, paint);
-    canvas.drawRRect(trailer2, borderPaint);
+    // Reboque 2
+    _drawTrailer(canvas, w * 0.18, h * 0.64, w * 0.64, h * 0.32, paint, borderPaint, detailPaint);
   }
 
   void _drawRodotrem(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cabine
-    final cabPath = Path();
-    cabPath.moveTo(w / 2, 0);
-    cabPath.lineTo(w * 0.8, h * 0.15);
-    cabPath.lineTo(w * 0.7, h * 0.15);
-    cabPath.lineTo(w * 0.7, h * 0.19);
-    cabPath.lineTo(w * 0.3, h * 0.19);
-    cabPath.lineTo(w * 0.3, h * 0.15);
-    cabPath.lineTo(w * 0.2, h * 0.15);
-    cabPath.close();
-    canvas.drawPath(cabPath, paint);
-    canvas.drawPath(cabPath, borderPaint);
+    // Cavalo mecânico
+    _drawCab(canvas, w * 0.24, 0, w * 0.52, h * 0.18, paint, borderPaint);
 
-    final pinPaint = Paint()
+    // Pino 1 (chassis)
+    final chassisPaint = Paint()
       ..color = borderPaint.color.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
-
-    // Pino 1
-    canvas.drawLine(Offset(w / 2, h * 0.19), Offset(w / 2, h * 0.24), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.18), Offset(w / 2, h * 0.23), chassisPaint);
 
     // Reboque 1
-    final RRect trailer1 = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.24, h * 0.24, w * 0.76, h * 0.45),
-      const Radius.circular(2),
-    );
-    canvas.drawRRect(trailer1, paint);
-    canvas.drawRRect(trailer1, borderPaint);
+    _drawTrailer(canvas, w * 0.20, h * 0.23, w * 0.60, h * 0.22, paint, borderPaint, detailPaint);
 
     // Pino 2
-    canvas.drawLine(Offset(w / 2, h * 0.45), Offset(w / 2, h * 0.49), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.45), Offset(w / 2, h * 0.49), chassisPaint);
 
     // Reboque 2
-    final RRect trailer2 = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.24, h * 0.49, w * 0.76, h * 0.70),
-      const Radius.circular(2),
-    );
-    canvas.drawRRect(trailer2, paint);
-    canvas.drawRRect(trailer2, borderPaint);
+    _drawTrailer(canvas, w * 0.20, h * 0.49, w * 0.60, h * 0.22, paint, borderPaint, detailPaint);
 
     // Pino 3
-    canvas.drawLine(Offset(w / 2, h * 0.70), Offset(w / 2, h * 0.74), pinPaint);
+    canvas.drawLine(Offset(w / 2, h * 0.71), Offset(w / 2, h * 0.75), chassisPaint);
 
     // Reboque 3
-    final RRect trailer3 = RRect.fromRectAndRadius(
-      Rect.fromLTRB(w * 0.24, h * 0.74, w * 0.76, h * 0.95),
-      const Radius.circular(2),
-    );
-    canvas.drawRRect(trailer3, paint);
-    canvas.drawRRect(trailer3, borderPaint);
+    _drawTrailer(canvas, w * 0.20, h * 0.75, w * 0.60, h * 0.21, paint, borderPaint, detailPaint);
   }
 
   @override
@@ -347,3 +345,4 @@ class _VehiclePainter extends CustomPainter {
     return oldDelegate.color != color || oldDelegate.profileType != profileType;
   }
 }
+

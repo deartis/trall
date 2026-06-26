@@ -231,6 +231,7 @@ class ApiService {
       case 'GAS_STATION': return MarkerType.gasStation;
       case 'MECHANIC': return MarkerType.mechanic;
       case 'RESTAURANT': return MarkerType.restaurant;
+      case 'SPEED_CAMERA': return MarkerType.speedCamera;
       default: return MarkerType.other;
     }
   }
@@ -242,11 +243,11 @@ class ApiService {
       case MarkerType.police: return 'POLICE';
       case MarkerType.danger: return 'RISK_AREA';
       case MarkerType.loading: return 'LOAD_UNLOAD';
-      case MarkerType.unloading: return 'LOAD_UNLOAD';
       case MarkerType.parking: return 'OTHER';
       case MarkerType.gasStation: return 'GAS_STATION';
       case MarkerType.mechanic: return 'MECHANIC';
       case MarkerType.restaurant: return 'RESTAURANT';
+      case MarkerType.speedCamera: return 'SPEED_CAMERA';
       case MarkerType.other: return 'OTHER';
     }
   }

@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../controllers/truck_controller.dart';
 import '../models/truck_profile.dart';
-import 'login_screen.dart';
+
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -498,10 +498,9 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                 ),
                                 onPressed: () {
-                                  Navigator.push(
+                                  Navigator.pushNamed(
                                     context,
-                                    MaterialPageRoute(
-                                        builder: (_) => const LoginScreen()),
+                                    '/login',
                                   );
                                 },
                               ),

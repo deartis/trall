@@ -5,11 +5,9 @@ import '../core/app_colors.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../controllers/truck_controller.dart';
-import '../screens/profile_screen.dart';
-import '../screens/settings_screen.dart';
 import '../widgets/recent_destinations.dart';
 import '../features/route/models/delivery_stop.dart';
-import '../features/route/screens/route_manager_screen.dart';
+
 
 class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key});
@@ -107,11 +105,7 @@ class AppDrawer extends StatelessWidget {
                 child: GestureDetector(
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const ProfileScreen()),
-                    );
+                    Navigator.pushNamed(context, '/profile');
                   },
                   child: Container(
                     padding: const EdgeInsets.all(16),
@@ -363,10 +357,9 @@ class AppDrawer extends StatelessWidget {
                   onTap: () async {
                     Navigator.pop(context);
                     final result =
-                        await Navigator.push<List<DeliveryStop>>(
+                        await Navigator.pushNamed<List<DeliveryStop>>(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const RouteManagerScreen()),
+                      '/route_manager',
                     );
 
                     if (result != null && context.mounted) {
@@ -426,11 +419,7 @@ class AppDrawer extends StatelessWidget {
                 label: 'Meu Perfil',
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const ProfileScreen()),
-                  );
+                  Navigator.pushNamed(context, '/profile');
                 },
               ),
               _DrawerNavItem(
@@ -438,12 +427,7 @@ class AppDrawer extends StatelessWidget {
                 label: 'Configurações',
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SettingsScreen(),
-                    ),
-                  );
+                  Navigator.pushNamed(context, '/settings');
                 },
               ),
               SizedBox(height: safeBottom + 16),
