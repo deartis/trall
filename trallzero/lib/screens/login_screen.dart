@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/auth_service.dart';
+import '../core/app_snackbar.dart';
+import '../services/auth_service.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -83,11 +84,10 @@ class LoginScreen extends StatelessWidget {
                       if (success && context.mounted) {
                         Navigator.pop(context);
                       } else if (!success && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Login cancelado ou falhou.'),
-                            backgroundColor: Colors.redAccent,
-                          ),
+                        showStyledSnackBar(
+                          context: context,
+                          message: 'Login cancelado ou falhou.',
+                          isError: true,
                         );
                       }
                     },
@@ -188,23 +188,59 @@ class _GoogleLogo extends StatelessWidget {
 class _GoogleLogoPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
+    final sw = size.width * 0.17; // espessura do traço
+    final rect = Rect.fromLTWH(
+      sw / 2, sw / 2,
+      size.width - sw,
+      size.height - sw,
+    );
+    final r = (size.width - sw) / 2;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
 
-    // Arco vermelho (topo-direita)
-    final redPaint = Paint()..color = const Color(0xFFEA4335)..strokeWidth = size.width * 0.18..style = PaintingStyle.stroke;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius * 0.82), -0.5, 2.0, false, redPaint);
+    // ── Arco vermelho (topo → direita, ~330° a 90°) ──
+    _arc(canvas, rect, sw, const Color(0xFFEA4335), -0.35, 1.25);
+    // ── Arco amarelo (direita → baixo-direita, ~90° a 180°) ──
+    _arc(canvas, rect, sw, const Color(0xFFFBBC05), 0.9, 0.55);
+    // ── Arco verde (baixo-direita → esquerda, ~180° a 270°) ──
+    _arc(canvas, rect, sw, const Color(0xFF34A853), 1.45, 0.65);
+    // ── Arco azul (esquerda → topo, ~270° a ~330°) ──
+    _arc(canvas, rect, sw, const Color(0xFF4285F4), 2.1, 1.45);
 
-    // Arco azul (esquerda)
-    final bluePaint = Paint()..color = const Color(0xFF4285F4)..strokeWidth = size.width * 0.18..style = PaintingStyle.stroke;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius * 0.82), 1.5, 2.3, false, bluePaint);
+    // ── Barra horizontal + vertical direita (azul) ──
+    final barPaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..strokeWidth = sw
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
-    // Barra horizontal direita (azul)
-    final barPaint = Paint()..color = const Color(0xFF4285F4)..strokeWidth = size.width * 0.18..strokeCap = StrokeCap.round;
+    // Linha horizontal: do centro até a borda direita
     canvas.drawLine(
-      Offset(size.width * 0.5, size.height * 0.5),
-      Offset(size.width * 0.95, size.height * 0.5),
+      Offset(cx, cy),
+      Offset(size.width - sw / 2, cy),
       barPaint,
+    );
+    // Linha vertical: do centro para baixo (metade do raio)
+    canvas.drawLine(
+      Offset(size.width - sw / 2, cy),
+      Offset(size.width - sw / 2, cy + r * 0.55),
+      barPaint,
+    );
+  }
+
+  void _arc(Canvas canvas, Rect rect, double sw, Color color,
+      double startAngle, double sweepAngle) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = sw
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(
+      rect,
+      startAngle * 3.14159,
+      sweepAngle * 3.14159,
+      false,
+      paint,
     );
   }
 

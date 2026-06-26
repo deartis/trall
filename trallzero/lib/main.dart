@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'core/app_theme.dart';
 import 'features/home/screens/home_screen.dart';
 import 'features/route/screens/route_manager_screen.dart';
 import 'controllers/truck_controller.dart';
@@ -44,13 +44,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Trall',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xFFE07B1A), // Laranja âmbar
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-        fontFamily: GoogleFonts.inter().fontFamily,
-      ),
+      theme: AppTheme.dark,
       initialRoute: '/',
       routes: {
         '/': (context) => const HomeScreen(),

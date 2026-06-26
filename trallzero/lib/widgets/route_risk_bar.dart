@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/app_colors.dart';
 import '../models/road_analysis.dart';
 
 /// Barra horizontal que mostra os próximos quilômetros da rota
@@ -18,13 +19,13 @@ class RouteRiskBar extends StatelessWidget {
   Color _colorForLevel(RoadHazardLevel level) {
     switch (level) {
       case RoadHazardLevel.safe:
-        return const Color(0xFF34C759);
+        return AppColors.safe;
       case RoadHazardLevel.attention:
-        return const Color(0xFFFF9500);
+        return AppColors.attention;
       case RoadHazardLevel.heavy:
-        return const Color(0xFFFF6B00);
+        return AppColors.heavy;
       case RoadHazardLevel.avoid:
-        return const Color(0xFFFF3B30);
+        return AppColors.danger;
     }
   }
 
@@ -46,95 +47,111 @@ class RouteRiskBar extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Label
-          Row(
-            children: [
-              Text(
-                'PERFIL DA ROTA',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.25),
-                  fontSize: 8,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
+      child: Tooltip(
+        message: 'Legenda: 🟢 Seguro · 🟡 Atenção · 🟠 Pesado · 🔴 Risco/Evitar',
+        triggerMode: TooltipTriggerMode.tap,
+        preferBelow: false,
+        verticalOffset: 20,
+        decoration: BoxDecoration(
+          color: AppColors.bgPanel.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        ),
+        textStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Label
+            Row(
+              children: [
+                Text(
+                  'PERFIL DA ROTA',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
                 ),
-              ),
-              const Spacer(),
-              Text(
-                _riskSummary(),
-                style: TextStyle(
-                  color: _colorForLevel(_maxLevel()),
-                  fontSize: 8,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
+                const Spacer(),
+                Text(
+                  _riskSummary(),
+                  style: TextStyle(
+                    color: _colorForLevel(_maxLevel()),
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
+              ],
+            ),
+            const SizedBox(height: 4),
 
-          // Barra de risco + indicador de posição
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final barWidth = constraints.maxWidth;
-              final indicatorX = (progressRatio * barWidth).clamp(0.0, barWidth - 2);
+            // Barra de risco + indicador de posição
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final barWidth = constraints.maxWidth;
+                final indicatorX = (progressRatio * barWidth).clamp(0.0, barWidth - 2);
 
-              return SizedBox(
-                height: 14,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    // Segmentos coloridos
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Row(
-                          children: segments.map((seg) {
-                            final ratio =
-                                (seg.distanceMeters / totalDistanceMeters)
-                                    .clamp(0.0, 1.0);
-                            return Flexible(
-                              flex: (ratio * 10000).round(),
-                              child: Tooltip(
-                                message: seg.description,
-                                child: Container(
-                                  height: 8,
-                                  color: _colorForLevel(seg.hazardLevel),
+                return SizedBox(
+                  height: 14,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // Segmentos coloridos
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Row(
+                            children: segments.map((seg) {
+                              final ratio =
+                                  (seg.distanceMeters / totalDistanceMeters)
+                                      .clamp(0.0, 1.0);
+                              return Flexible(
+                                flex: (ratio * 10000).round(),
+                                child: Tooltip(
+                                  message: seg.description,
+                                  child: Container(
+                                    height: 8,
+                                    color: _colorForLevel(seg.hazardLevel),
+                                  ),
                                 ),
-                              ),
-                            );
-                          }).toList(),
+                              );
+                            }).toList(),
+                          ),
                         ),
                       ),
-                    ),
 
-                    // Indicador de posição (triângulo / linha)
-                    Positioned(
-                      left: indicatorX,
-                      top: 0,
-                      child: Container(
-                        width: 2.5,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.5),
-                              blurRadius: 4,
-                            ),
-                          ],
+                      // Indicador de posição (triângulo / linha)
+                      Positioned(
+                        left: indicatorX,
+                        top: 0,
+                        child: Container(
+                          width: 2.5,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

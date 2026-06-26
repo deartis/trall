@@ -1,9 +1,10 @@
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../core/app_colors.dart';
 import '../controllers/truck_controller.dart';
 import 'avoid_options_sheet.dart';
 import '../screens/settings_screen.dart';
@@ -149,19 +150,19 @@ class _NavigationPanelState extends State<NavigationPanel> {
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: const Color(0xFF0E1017),
+            color: AppColors.bgBase,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border(
               top: BorderSide(
                 color: isNavigating
-                    ? const Color(0xFF34C759).withValues(alpha: 0.3)
-                    : const Color(0xFF2563EB).withValues(alpha: 0.25),
+                    ? AppColors.safeBorder
+                    : AppColors.blueBorder,
                 width: 1,
               ),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.6),
+                color: AppColors.shadow,
                 blurRadius: 24,
                 offset: const Offset(0, -4),
               ),
@@ -175,363 +176,352 @@ class _NavigationPanelState extends State<NavigationPanel> {
               // ── Handle ────────────────────────────────────────────
               Center(
                 child: Container(
-                  width: 36,
-                  height: 3,
+                  width: 48,
+                  height: 5,
                   margin: const EdgeInsets.only(top: 10, bottom: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(2),
+                    color: isNavigating
+                        ? AppColors.safeBorder
+                        : AppColors.handle,
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 ),
               ),
 
-              // ── Linha principal: tempo + distância + velocidade ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // Ícone de status
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: isNavigating
-                            ? const Color(0xFF34C759).withValues(alpha: 0.12)
-                            : const Color(0xFF2563EB).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        isNavigating
-                            ? Icons.navigation_rounded
-                            : Icons.route_rounded,
-                        color: isNavigating
-                            ? const Color(0xFF34C759)
-                            : const Color(0xFF2563EB),
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+              // ════════════════════════════════════════════════════
+              //  MODO NAVEGANDO: peek focado na manobra atual
+              // ════════════════════════════════════════════════════
+              if (isNavigating) ...[
+                _NavigatingPeek(
+                  tc: tc,
+                  kmh: _kmh,
+                  cardinal: _cardinal,
+                  onStop: widget.onStop,
+                ),
 
-                    // Tempo
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+                // Risk Bar
+                if (tc.routeAnalysisSegments.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  RouteRiskBar(
+                    segments: tc.routeAnalysisSegments,
+                    totalDistanceMeters:
+                        tc.routePoints.isEmpty ? 1 : _totalRouteDistance(tc),
+                    progressMeters: tc.progressOnRouteMeters,
+                  ),
+                ],
+
+                // Quick-Add marker
+                if (widget.onAddMarkerAtCurrentPosition != null) ...[
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    child: Row(
                       children: [
-                        Text(
-                          tc.formattedDuration,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 26,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.8,
-                            height: 1,
-                          ),
+                        _Chip(
+                          icon: Icons.add_location_alt_rounded,
+                          label: 'Marcar aqui',
+                          color: AppColors.amberWarm,
+                          onTap: widget.onAddMarkerAtCurrentPosition!,
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          tc.formattedDistance,
-                          style: TextStyle(
-                            color: isNavigating
-                                ? const Color(0xFF34C759)
-                                : const Color(0xFF2563EB),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (tc.formattedETA.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.schedule_rounded,
-                                size: 11,
-                                color: Colors.white.withValues(alpha: 0.35),
-                              ),
-                              const SizedBox(width: 3),
-                              Text(
-                                tc.formattedETA,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.35),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              if (tc.drivingSeconds > 0) ...[
-                                const SizedBox(width: 12),
-                                // Timer de fadiga — cor gradual conforme severidade
-                                _FatigueTimer(tc: tc),
-                              ],
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-
-                    const Spacer(),
-
-                    // Velocímetro (só em navegação)
-                    if (isNavigating) ...[
-                      _Speedometer(kmh: _kmh, cardinal: _cardinal),
-                      const SizedBox(width: 12),
-                    ],
-
-                    // Botão GO / PARAR
-                    _GoButton(
-                      isNavigating: isNavigating,
-                      onTap: isNavigating ? widget.onStop : widget.onGo,
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── Risk Bar (sempre que há segmentos) ──────────────
-              if (tc.routeAnalysisSegments.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                RouteRiskBar(
-                  segments: tc.routeAnalysisSegments,
-                  totalDistanceMeters: tc.routePoints.isEmpty ? 1 : _totalRouteDistance(tc),
-                  progressMeters: tc.progressOnRouteMeters,
-                ),
-              ],
-
-              // ── Chips de ação (modo não navegando) ──────────────
-              if (!isNavigating) ...[
-                const SizedBox(height: 14),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      _Chip(
-                        icon: Icons.settings_rounded,
-                        label: 'Ajustes',
-                        color: Colors.white.withValues(alpha: 0.5),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const SettingsScreen()),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      _Chip(
-                        icon: Icons.block_rounded,
-                        label: 'Evitar',
-                        color: tc.avoidTolls || tc.avoidFerries || tc.avoidUnpaved
-                            ? const Color(0xFFFF3B30)
-                            : Colors.white.withValues(alpha: 0.5),
-                        onTap: () {
-                          showModalBottomSheet(
-                            context: context,
-                            backgroundColor: Colors.transparent,
-                            isScrollControlled: true,
-                            builder: (_) => const AvoidOptionsSheet(),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      _Chip(
-                        icon: Icons.swap_horiz_rounded,
-                        label: 'Rotas',
-                        color: Colors.white.withValues(alpha: 0.5),
-                        onTap: widget.onRoutesTap ?? () {},
-                      ),
-                      if (widget.onStopsTap != null) ...[
                         const SizedBox(width: 8),
                         _Chip(
-                          icon: Icons.alt_route_rounded,
-                          label: 'Paradas',
-                          color: Colors.white.withValues(alpha: 0.5),
-                          onTap: widget.onStopsTap!,
+                          icon: Icons.stop_circle_outlined,
+                          label: 'Encerrar',
+                          color: AppColors.danger,
+                          onTap: widget.onEndRoute ?? () {},
                         ),
                       ],
-                      if (widget.mapRepaintKey != null) ...[
-                        const SizedBox(width: 8),
-                        _Chip(
-                          icon: _isSharingRoute
-                              ? Icons.hourglass_top_rounded
-                              : Icons.share_rounded,
-                          label: 'Compartilhar',
-                          color: Colors.white.withValues(alpha: 0.5),
-                          onTap: _isSharingRoute ? () {} : _shareRoute,
-                        ),
-                      ],
-                      const SizedBox(width: 16),
-                      _Chip(
-                        icon: Icons.stop_circle_outlined,
-                        label: 'Encerrar',
-                        color: const Color(0xFFFF3B30).withValues(alpha: 0.8),
-                        onTap: widget.onEndRoute ?? () {},
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
 
-              // ── Quick-Add marker (modo navegando) ───────────────
-              if (isNavigating && widget.onAddMarkerAtCurrentPosition != null) ...[
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                  child: Row(
-                    children: [
-                      _Chip(
-                        icon: Icons.add_location_alt_rounded,
-                        label: 'Marcar aqui',
-                        color: const Color(0xFFFF9500),
-                        onTap: widget.onAddMarkerAtCurrentPosition!,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-
-              // ── Divisor ─────────────────────────────────────────
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        height: 1,
-                        color: Colors.white.withValues(alpha: 0.06),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Text(
-                        'PRÓXIMA MANOBRA',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.25),
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Container(
-                        height: 1,
-                        color: Colors.white.withValues(alpha: 0.06),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── Próxima instrução de manobra ─────────────────────
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                child: Builder(builder: (context) {
-                  final step = tc.nextStep;
-                  final icon = step != null
-                      ? _maneuverIcon(step.type, step.modifier)
-                      : Icons.flag_rounded;
-                  final mainText = step != null
-                      ? _maneuverLabel(step.type, step.modifier)
-                      : (isNavigating
-                          ? 'Continue em frente'
-                          : 'Toque em GO para iniciar');
-                  final subText = step != null
-                      ? '${step.formattedDistance}${step.streetName.isNotEmpty ? ' — ${step.streetName}' : ''}'
-                      : (isNavigating ? '' : 'A rota está calculada e pronta');
-
-                  return Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          icon,
-                          color: Colors.white.withValues(alpha: 0.8),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              mainText,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (subText.isNotEmpty)
-                              Text(
-                                subText,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.4),
-                                  fontSize: 12,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        color: Colors.white.withValues(alpha: 0.2),
-                      ),
-                    ],
-                  );
-                }),
-              ),
-
-              // ── Seção expandida: turn-by-turn + findings ─────────
-              if (!isNavigating && tc.availableRoutes.isNotEmpty) ...[
+                // Seção expandida: turn-by-turn em mid
                 const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.06),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Text(
-                          'PERCURSO COMPLETO',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Container(
-                          height: 1,
-                          color: Colors.white.withValues(alpha: 0.06),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _SectionDivider(label: 'PERCURSO COMPLETO'),
                 const SizedBox(height: 8),
                 _TurnByTurnList(tc: tc),
                 if (tc.routeAnalysisFindings.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   _FindingsList(tc: tc),
+                ],
+              ]
+
+              // ════════════════════════════════════════════════════
+              //  MODO ROTA CALCULADA (não navegando): layout original
+              // ════════════════════════════════════════════════════
+              else ...[
+                // ── Linha principal: status + tempo + distância ──
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // Ícone de rota calculada
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.blueSubtle,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.route_rounded,
+                          color: AppColors.blue,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+
+                      // Tempo + distância + ETA
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            tc.formattedDuration,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.8,
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            tc.formattedDistance,
+                            style: const TextStyle(
+                              color: AppColors.blue,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (tc.formattedETA.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.schedule_rounded,
+                                  size: 11,
+                                  color: AppColors.textTertiary,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  tc.formattedETA,
+                                  style: TextStyle(
+                                    color: AppColors.textTertiary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+
+                      const Spacer(),
+
+                      // Botão GO
+                      _GoButton(
+                        isNavigating: false,
+                        onTap: widget.onGo,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Risk Bar
+                if (tc.routeAnalysisSegments.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  RouteRiskBar(
+                    segments: tc.routeAnalysisSegments,
+                    totalDistanceMeters:
+                        tc.routePoints.isEmpty ? 1 : _totalRouteDistance(tc),
+                    progressMeters: tc.progressOnRouteMeters,
+                  ),
+                ],
+
+                // ── Chips de ação ────────────────────────────────
+                const SizedBox(height: 14),
+                Stack(
+                  children: [
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(20, 0, 48, 0),
+                      child: Row(
+                        children: [
+                          _Chip(
+                            icon: Icons.settings_rounded,
+                            label: 'Ajustes',
+                            color: AppColors.textMuted,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const SettingsScreen()),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          _Chip(
+                            icon: Icons.block_rounded,
+                            label: 'Evitar',
+                            color: tc.avoidTolls ||
+                                    tc.avoidFerries ||
+                                    tc.avoidUnpaved
+                                ? AppColors.danger
+                                : AppColors.textMuted,
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                backgroundColor: Colors.transparent,
+                                isScrollControlled: true,
+                                builder: (_) => const AvoidOptionsSheet(),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          _Chip(
+                            icon: Icons.swap_horiz_rounded,
+                            label: 'Rotas',
+                            color: AppColors.textMuted,
+                            onTap: widget.onRoutesTap ?? () {},
+                          ),
+                          if (widget.onStopsTap != null) ...[
+                            const SizedBox(width: 8),
+                            _Chip(
+                              icon: Icons.alt_route_rounded,
+                              label: 'Paradas',
+                              color: AppColors.textMuted,
+                              onTap: widget.onStopsTap!,
+                            ),
+                          ],
+                          if (widget.mapRepaintKey != null) ...[
+                            const SizedBox(width: 8),
+                            _Chip(
+                              icon: _isSharingRoute
+                                  ? Icons.hourglass_top_rounded
+                                  : Icons.share_rounded,
+                              label: 'Compartilhar',
+                              color: AppColors.textMuted,
+                              onTap: _isSharingRoute ? () {} : _shareRoute,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    // Fade-gradient indicando que há mais chips
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: 48,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                AppColors.bgBase.withValues(alpha: 0),
+                                AppColors.bgBase,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                // ── Encerrar Rota ─────────────────────────────────
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _EndRouteButton(onTap: widget.onEndRoute ?? () {}),
+                ),
+
+                // ── Próxima instrução (modo não navegando) ────────
+                const SizedBox(height: 10),
+                _SectionDivider(label: 'PRÓXIMA MANOBRA'),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                  child: Builder(builder: (context) {
+                    final step = tc.nextStep;
+                    final icon = step != null
+                        ? _maneuverIcon(step.type, step.modifier)
+                        : Icons.flag_rounded;
+                    final mainText = step != null
+                        ? _maneuverLabel(step.type, step.modifier)
+                        : 'Toque em GO para iniciar';
+                    final subText = step != null
+                        ? '${step.formattedDistance}${step.streetName.isNotEmpty ? ' — ${step.streetName}' : ''}'
+                        : 'A rota está calculada e pronta';
+
+                    return Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: AppColors.divider,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            icon,
+                            color: AppColors.textContent,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                mainText,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                subText,
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.textTertiary,
+                        ),
+                      ],
+                    );
+                  }),
+                ),
+
+                // ── Seção expandida: turn-by-turn + findings ──────
+                if (tc.availableRoutes.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _SectionDivider(label: 'PERCURSO COMPLETO'),
+                  const SizedBox(height: 8),
+                  _TurnByTurnList(tc: tc),
+                  if (tc.routeAnalysisFindings.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _FindingsList(tc: tc),
+                  ],
                 ],
               ],
 
@@ -608,13 +598,13 @@ class _FatigueTimerState extends State<_FatigueTimer>
   Color get _color {
     switch (widget.tc.fatigueSeverity) {
       case FatigueSeverity.none:
-        return Colors.white.withValues(alpha: 0.35);
+        return AppColors.textTertiary;
       case FatigueSeverity.warning:
-        return const Color(0xFFFF9500);
+        return AppColors.attention;
       case FatigueSeverity.danger:
-        return const Color(0xFFFF6B00);
+        return AppColors.heavy;
       case FatigueSeverity.critical:
-        return const Color(0xFFFF3B30);
+        return AppColors.danger;
     }
   }
 
@@ -655,10 +645,10 @@ class _FatigueTimerState extends State<_FatigueTimer>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
         decoration: BoxDecoration(
-          color: const Color(0xFFFF3B30).withValues(alpha: 0.15),
+          color: AppColors.dangerFaint,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: const Color(0xFFFF3B30).withValues(alpha: 0.4),
+            color: AppColors.dangerBorderStrong,
             width: 1,
           ),
         ),
@@ -756,10 +746,10 @@ class _FindingsList extends StatelessWidget {
   final TruckController tc;
 
   Color _severityColor(RoadHazardLevel l) => switch (l) {
-    RoadHazardLevel.safe      => const Color(0xFF34C759),
-    RoadHazardLevel.attention => const Color(0xFFFF9500),
-    RoadHazardLevel.heavy     => const Color(0xFFFF6B00),
-    RoadHazardLevel.avoid     => const Color(0xFFFF3B30),
+    RoadHazardLevel.safe      => AppColors.safe,
+    RoadHazardLevel.attention => AppColors.attention,
+    RoadHazardLevel.heavy     => AppColors.heavy,
+    RoadHazardLevel.avoid     => AppColors.danger,
   };
 
   @override
@@ -894,6 +884,186 @@ String _maneuverLabel(String type, String modifier) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Peek de navegação: foco total na próxima manobra
+// ─────────────────────────────────────────────────────────────
+class _NavigatingPeek extends StatelessWidget {
+  const _NavigatingPeek({
+    required this.tc,
+    required this.kmh,
+    required this.cardinal,
+    required this.onStop,
+  });
+
+  final TruckController tc;
+  final double kmh;
+  final String cardinal;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final step = tc.nextStep;
+    final maneuverIcon = step != null
+        ? _maneuverIcon(step.type, step.modifier)
+        : Icons.navigation_rounded;
+    final instruction = step != null
+        ? _maneuverLabel(step.type, step.modifier)
+        : 'Continue em frente';
+    final streetName = step?.streetName ?? '';
+    final distanceText = step?.formattedDistance ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // ── Ícone de manobra destacado ───────────────────────
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.safeSubtle,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.safeBorder),
+            ),
+            child: Icon(
+              maneuverIcon,
+              color: AppColors.safe,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // ── Instrução + rua ─────────────────────────────
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Distância para a manobra (em destaque)
+                if (distanceText.isNotEmpty)
+                  Text(
+                    distanceText,
+                    style: const TextStyle(
+                      color: AppColors.safe,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                // Instrução da manobra
+                Text(
+                  instruction,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (streetName.isNotEmpty)
+                  Text(
+                    streetName,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                // Linha de ETA + fadiga
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    if (tc.formattedETA.isNotEmpty) ...[
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 10,
+                        color: AppColors.textTertiary,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        tc.formattedETA,
+                        style: TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: 10,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (tc.drivingSeconds > 0) _FatigueTimer(tc: tc),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          // ── Velocidade + Botão PARAR ───────────────────────
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _Speedometer(kmh: kmh, cardinal: cardinal),
+              const SizedBox(height: 6),
+              _GoButton(
+                isNavigating: true,
+                onTap: onStop,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Divisor de seção reutilizável
+// ─────────────────────────────────────────────────────────────
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 1,
+              color: AppColors.divider,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.textTertiary,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: AppColors.divider,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Velocímetro compacto
 // ─────────────────────────────────────────────────────────────
 class _Speedometer extends StatelessWidget {
@@ -903,8 +1073,8 @@ class _Speedometer extends StatelessWidget {
   final String cardinal;
 
   Color get _speedColor {
-    if (kmh > 90) return const Color(0xFFFF3B30);
-    if (kmh > 60) return const Color(0xFFFF9500);
+    if (kmh > 90) return AppColors.danger;
+    if (kmh > 60) return AppColors.attention;
     return Colors.white;
   }
 
@@ -936,7 +1106,7 @@ class _Speedometer extends StatelessWidget {
         Text(
           cardinal,
           style: TextStyle(
-            color: const Color(0xFF2563EB).withValues(alpha: 0.8),
+            color: AppColors.blue.withValues(alpha: 0.8),
             fontSize: 10,
             fontWeight: FontWeight.w700,
           ),
@@ -958,21 +1128,20 @@ class _GoButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        onTap();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
-        width: 76,
-        height: 52,
+        width: 68,
+        height: 44,
         decoration: BoxDecoration(
-          color: isNavigating
-              ? const Color(0xFFFF3B30)
-              : const Color(0xFF2563EB),
+          color: isNavigating ? AppColors.danger : AppColors.blue,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: (isNavigating
-                      ? const Color(0xFFFF3B30)
-                      : const Color(0xFF2563EB))
+              color: (isNavigating ? AppColors.danger : AppColors.blue)
                   .withValues(alpha: 0.35),
               blurRadius: 14,
               spreadRadius: 1,
@@ -985,7 +1154,7 @@ class _GoButton extends StatelessWidget {
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w900,
-              fontSize: 16,
+              fontSize: 15,
               letterSpacing: 1.5,
             ),
           ),
@@ -1039,6 +1208,56 @@ class _Chip extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Botão de encerrar rota — destaque vermelho separado
+// ─────────────────────────────────────────────────────────────
+class _EndRouteButton extends StatelessWidget {
+  const _EndRouteButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          height: 48,
+          decoration: BoxDecoration(
+            color: AppColors.dangerFaint,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppColors.dangerBorderStrong,
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.stop_circle_outlined,
+                color: AppColors.danger,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Encerrar Rota',
+                style: TextStyle(
+                  color: AppColors.danger,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

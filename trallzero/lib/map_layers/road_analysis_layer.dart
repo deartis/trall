@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 
+import '../core/app_colors.dart';
 import '../models/road_analysis.dart';
 
 List<Polyline> buildRoadAnalysisPolylines(List<RoadSegmentAnalysis> segments) {
@@ -16,12 +17,12 @@ List<Polyline> buildRoadAnalysisPolylines(List<RoadSegmentAnalysis> segments) {
 Color _colorForHazard(RoadHazardLevel hazardLevel) {
   switch (hazardLevel) {
     case RoadHazardLevel.safe:
-      return const Color(0xFF34C759);
+      return AppColors.safe;
     case RoadHazardLevel.attention:
-      return const Color(0xFFFFD60A);
+      return AppColors.yellow;
     case RoadHazardLevel.heavy:
-      return const Color(0xFFFF9F0A);
+      return AppColors.attentionRoute;
     case RoadHazardLevel.avoid:
-      return const Color(0xFFFF453A);
+      return AppColors.dangerRoute;
   }
 }

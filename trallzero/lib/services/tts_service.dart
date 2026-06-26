@@ -16,7 +16,19 @@ class TtsService {
 
   Future<void> _initTts() async {
     try {
-      await _flutterTts.setLanguage("pt-BR");
+      final dynamic isLanguageAvailable = await _flutterTts.isLanguageAvailable("pt-BR");
+      if (isLanguageAvailable == true) {
+        await _flutterTts.setLanguage("pt-BR");
+        debugPrint('[TTS] Linguagem pt-BR configurada com sucesso.');
+      } else {
+        final dynamic isPtAvailable = await _flutterTts.isLanguageAvailable("pt");
+        if (isPtAvailable == true) {
+          await _flutterTts.setLanguage("pt");
+          debugPrint('[TTS] Linguagem pt-BR indisponível, usando fallback "pt".');
+        } else {
+          debugPrint('[TTS] Nenhuma linguagem em português (pt-BR / pt) está disponível neste dispositivo.');
+        }
+      }
       await _flutterTts.setSpeechRate(0.5); // Velocidade agradável e clara
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);

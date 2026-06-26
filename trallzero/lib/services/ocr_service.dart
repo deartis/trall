@@ -118,7 +118,7 @@ class OcrService {
     // Ex: NOME/RAZÃO SOCIAL: JOÃO DA SILVA
     // Ex: DESTINATÁRIO: TRANSPORTADORA XYZ
     final singleLineRegexes = [
-      RegExp(r'(?:NOME\s*/\s*RAZ[ÃA]O\s+SOCIAL|NOME\s+RAZ[ÃA]O\s+SOCIAL|DESTINAT[AÁ]RIO\s*/\s*REMETENTE|DESTINAT[AÁ]RIO|CLIENTE)\s*[:\-]?\s*([A-ZÁÀÂÃÉÈÊÍÏÓÒÔÕÚÇÑ0-9\.\-\s]{3,})'),
+      RegExp(r'(?:NOME\s*/\s*RAZ[ÃA]O\s+SOCIAL|NOME\s+RAZ[ÃA]O\s+SOCIAL|DESTINAT[AÁ]RIO\s*/\s*REMETENTE|DESTINAT[AÁ]RIO|CLIENTE|LOJA|COM[ÉE]RCIO|MERCADO|SUPERMERCADO|DISTRIBUIDORA)\s*[:\-]?\s*([A-ZÁÀÂÃÉÈÊÍÏÓÒÔÕÚÇÑ0-9\.\-\s]{3,})'),
       RegExp(r'(?:RAZ[ÃA]O\s+SOCIAL)\s*[:\-]?\s*([A-ZÁÀÂÃÉÈÊÍÏÓÒÔÕÚÇÑ0-9\.\-\s]{3,})'),
     ];
 
@@ -149,9 +149,15 @@ class OcrService {
           lineUpper.contains('NOME/RAZÃO SOCIAL') ||
           lineUpper.contains('RAZÃO SOCIAL') ||
           lineUpper.contains('RAZAO SOCIAL') ||
-          lineUpper.contains('CLIENTE:')) {
+          lineUpper.contains('CLIENTE') ||
+          lineUpper.contains('LOJA') ||
+          lineUpper.contains('COMÉRCIO') ||
+          lineUpper.contains('COMERCIO') ||
+          lineUpper.contains('MERCADO') ||
+          lineUpper.contains('SUPERMERCADO') ||
+          lineUpper.contains('DISTRIBUIDORA')) {
         
-        String cleaned = lines[i].replaceAll(RegExp(r'(?:DESTINAT[AÁ]RIO(?:\s*/\s*REMETENTE)?|NOME\s*/\s*RAZ[ÃA]O\s+SOCIAL|RAZ[ÃA]O\s+SOCIAL|CLIENTE)\s*[:\-]?\s*', caseSensitive: false), '').trim();
+        String cleaned = lines[i].replaceAll(RegExp(r'(?:DESTINAT[AÁ]RIO(?:\s*/\s*REMETENTE)?|NOME\s*/\s*RAZ[ÃA]O\s+SOCIAL|RAZ[ÃA]O\s+SOCIAL|CLIENTE|LOJA|COM[ÉE]RCIO|MERCADO|SUPERMERCADO|DISTRIBUIDORA)\s*[:\-]?\s*', caseSensitive: false), '').trim();
         if (cleaned.length > 3 && !RegExp(r'^\d+$').hasMatch(cleaned)) {
           return _toTitleCase(cleaned);
         }
@@ -164,6 +170,35 @@ class OcrService {
               !RegExp(r'^\d+$').hasMatch(nextLine)) {
             return _toTitleCase(nextLine);
           }
+        }
+      }
+    }
+
+    // 3. Fallback: procurar por linhas que terminem com LTDA, S.A., S/A ou contendo palavras-chave
+    for (final line in lines) {
+      final lineUpper = line.toUpperCase();
+      if (lineUpper.contains('LTDA') || 
+          lineUpper.contains('S/A') || 
+          lineUpper.contains('S.A.') ||
+          lineUpper.contains('MEI') ||
+          lineUpper.contains(' EPP') ||
+          lineUpper.startsWith('LOJA ') ||
+          lineUpper.startsWith('COMÉRCIO ') ||
+          lineUpper.startsWith('COMERCIO ') ||
+          lineUpper.startsWith('MERCADO ') ||
+          lineUpper.startsWith('SUPERMERCADO ') ||
+          lineUpper.startsWith('DISTRIBUIDORA ') ||
+          lineUpper.startsWith('AUTO POSTO ') ||
+          lineUpper.startsWith('POSTO ')) {
+        
+        if (!lineUpper.contains('CNPJ') && 
+            !lineUpper.contains('CPF') && 
+            !lineUpper.contains('INSCRI') && 
+            !lineUpper.contains('RUA') && 
+            !lineUpper.contains('AVENIDA') && 
+            !lineUpper.contains('AV.') &&
+            !RegExp(r'^\d+$').hasMatch(line)) {
+          return _toTitleCase(line);
         }
       }
     }

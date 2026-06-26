@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../core/app_snackbar.dart';
 import '../../../controllers/truck_controller.dart';
 import '../../../services/ocr_service.dart';
 import '../../../services/location_service.dart';
@@ -139,8 +140,10 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
       tc.clearSuggestions();
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Endereço não encontrado.')),
+        showStyledSnackBar(
+          context: context,
+          message: 'Endereço não encontrado.',
+          isError: true,
         );
       }
     }
@@ -249,8 +252,10 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
 
   void _optimizeStops() {
     if (_stops.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Adicione pelo menos 2 paradas para otimizar.')),
+      showStyledSnackBar(
+        context: context,
+        message: 'Adicione pelo menos 2 paradas para otimizar.',
+        icon: Icons.warning_amber_rounded,
       );
       return;
     }
@@ -286,11 +291,11 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
       _isDirty = true;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('✅ Rota otimizada por proximidade!'),
-        backgroundColor: Color(0xFF34C759),
-      ),
+    showStyledSnackBar(
+      context: context,
+      message: 'Rota otimizada por proximidade!',
+      icon: Icons.check_circle_outline_rounded,
+      iconColor: const Color(0xFF34C759),
     );
   }
 
@@ -303,8 +308,10 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
 
   void _confirmRoute() {
     if (_stops.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Adicione ao menos uma parada.')),
+      showStyledSnackBar(
+        context: context,
+        message: 'Adicione ao menos uma parada.',
+        isError: true,
       );
       return;
     }

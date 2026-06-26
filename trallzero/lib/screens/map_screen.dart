@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ui' as ui;
+import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:math' as math;
 import 'package:flutter_compass/flutter_compass.dart';
@@ -8,6 +10,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import '../core/app_colors.dart';
+import '../core/app_snackbar.dart';
 import '../services/location_service.dart';
 import '../services/ocr_service.dart';
 import '../widgets/navigation_marker.dart';
@@ -249,9 +253,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           _offRouteCount = 0;
           truckController.updateCurrentStep(newPos); // avança manobra
         } else if (minDist >= 40) {
-          _offRouteCount++;
-          if (_offRouteCount >= 3 && !_isRecalculating) {
-            _triggerReroute(rawPos, truckController);
+          if (position.accuracy <= 20.0) {
+            _offRouteCount++;
+            if (_offRouteCount >= 3 && !_isRecalculating) {
+              _triggerReroute(rawPos, truckController);
+            }
+          } else {
+            debugPrint('[Rerouting] Desvio ignorado devido a baixa precisão do GPS: ${position.accuracy}m');
           }
         }
       }
@@ -449,7 +457,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   //  CÂMERA
   // ─────────────────────────────────────────────────────────────────────────
 
-  void _moveNavigationCamera(LatLng position, {bool instant = false}) {
+  void _moveNavigationCamera(
+    LatLng position, {
+    bool instant = false,
+    Duration? customDuration,
+    Curve? customCurve,
+  }) {
     final double zoom;
     if (_lastKnownSpeed > 22) {
       zoom = 15.5;
@@ -473,7 +486,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _animatedCurrentPosition = position;
       });
     } else {
-      _animateMapCamera(lookAheadCenter, -_heading, zoom);
+      _animateMapCamera(
+        lookAheadCenter,
+        -_heading,
+        zoom,
+        customDuration: customDuration,
+        customCurve: customCurve,
+      );
     }
   }
 
@@ -732,11 +751,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _searchController.text = address;
         context.read<TruckController>().fetchSuggestions(address, userLocation: _currentPosition);
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Não foi possível extrair um endereço da imagem.'),
-            backgroundColor: Color(0xFF1E2128),
-          ),
+        showStyledSnackBar(
+          context: context,
+          message: 'Não foi possível extrair um endereço da imagem.',
+          isError: true,
         );
       }
     } catch (e) {
@@ -1107,13 +1125,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             strokeWidth: 5.0,
                           );
                         }),
+                    // Glow effect — halo under the main route
+                    Polyline(
+                      points: tc.routePoints,
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.18),
+                      strokeWidth: 16.0,
+                    ),
                     ...(tc.routeAnalysisSegments.isNotEmpty
                         ? buildRoadAnalysisPolylines(tc.routeAnalysisSegments)
                         : [
                             Polyline(
                               points: tc.routePoints,
-                              color: Colors.blueAccent,
-                              strokeWidth: 6.0,
+                              color: const Color(0xFF3B82F6),
+                              strokeWidth: 5.5,
                             ),
                           ]),
                   ],
@@ -1123,37 +1147,65 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   if (_animatedCurrentPosition != null)
                     Marker(
                       point: _animatedCurrentPosition!,
-                      width: 50,
-                      height: 50,
+                      width: 54,
+                      height: 54,
                       rotate: true,
-                      child: const NavigationMarker(),
+                      child: NavigationMarker(
+                        speed: _lastKnownSpeed,
+                        profileType: tc.truckProfile.type,
+                      ),
                     ),
                   ...tc.deliveryStops.asMap().entries.map((entry) {
                     final index = entry.key;
                     final stop = entry.value;
                     return Marker(
                       point: LatLng(stop.lat, stop.lng),
-                      width: 40,
-                      height: 40,
+                      width: 48,
+                      height: 60,
                       rotate: true,
-                      child: Stack(
-                        alignment: Alignment.center,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.location_on,
-                            color: Color(0xFF34C759),
-                            size: 40,
-                          ),
-                          Positioned(
-                            top: 6,
-                            child: Text(
-                              '${index + 1}',
-                              style: const TextStyle(
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF34C759),
+                              shape: BoxShape.circle,
+                              border: Border.all(
                                 color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                                width: 2.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF34C759).withValues(alpha: 0.55),
+                                  blurRadius: 12,
+                                  spreadRadius: 1,
+                                  offset: const Offset(0, 3),
+                                ),
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.3),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                  height: 1,
+                                ),
                               ),
                             ),
+                          ),
+                          // Ponteiro triangular
+                          CustomPaint(
+                            size: const Size(12, 8),
+                            painter: _PinPointerPainter(color: const Color(0xFF34C759)),
                           ),
                         ],
                       ),
@@ -1243,7 +1295,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
           ), // RepaintBoundary
 
-          // ── BARRA DE BUSCA ────────────────────────────────────────────────
+          // ── BARRA DE BUSCA ───────────────────────────────────────────────────────────────────
+          // Oculta durante navegação ativa para não distrair o motorista
+          if (!tc.isNavigating)
           AnimatedPositioned(
             duration: const Duration(milliseconds: 400),
             curve: Curves.easeOutCubic,
@@ -1265,7 +1319,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             )
                           : BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.blueAccent.withValues(alpha: 0.2),
+                        color: const Color(0xFFE07B1A).withValues(alpha: 0.25),
                       ),
                       boxShadow: [
                         BoxShadow(
@@ -1287,7 +1341,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         border: InputBorder.none,
                         icon: const Icon(
                           Icons.search_rounded,
-                          color: Colors.blueAccent,
+                          color: Color(0xFFE07B1A),
                           size: 20,
                         ),
                         suffixIcon: Row(
@@ -1300,13 +1354,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 child: SizedBox(
                                   width: 16, height: 16,
                                   child: CircularProgressIndicator(
-                                    color: Colors.blueAccent, strokeWidth: 2,
+                                    color: Color(0xFFE07B1A), strokeWidth: 2,
                                   ),
                                 ),
                               )
                             else if (tc.destination == null && _searchController.text.isEmpty)
                               IconButton(
-                                icon: const Icon(Icons.document_scanner_rounded, color: Colors.blueAccent, size: 20),
+                                icon: const Icon(Icons.document_scanner_rounded, color: Color(0xFFE07B1A), size: 20),
                                 tooltip: 'Escanear nota fiscal',
                                 onPressed: _pickImageAndExtractAddress,
                               ),
@@ -1356,17 +1410,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           ),
                         FloatingActionButton.extended(
                           heroTag: 'find_pois',
-                          backgroundColor: const Color(0xFF2563EB),
+                          backgroundColor: const Color(0xFFE07B1A),
                           icon: tc.isLoadingPOIs 
                               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.local_gas_station_rounded, color: Colors.white, size: 20),
+                              : const Icon(Icons.place_rounded, color: Colors.white, size: 20),
                           label: Text(tc.isLoadingPOIs ? 'Buscando...' : 'Locais Próximos', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                           onPressed: tc.isLoadingPOIs ? null : () {
                             if (_currentPosition != null) {
                               tc.findNearbyPOIs(_currentPosition!);
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Aguardando sinal de GPS...')),
+                              showStyledSnackBar(
+                                context: context,
+                                message: 'Aguardando sinal de GPS...',
+                                icon: Icons.gps_off_rounded,
                               );
                             }
                           },
@@ -1382,7 +1438,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           bottom: Radius.circular(16),
                         ),
                         border: Border.all(
-                          color: Colors.blueAccent.withValues(alpha: 0.15),
+                          color: const Color(0xFFE07B1A).withValues(alpha: 0.15),
                         ),
                         boxShadow: [
                           BoxShadow(
@@ -1407,7 +1463,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             dense: true,
                             leading: const Icon(
                               Icons.location_on_rounded,
-                              color: Colors.blueAccent,
+                              color: Color(0xFFE07B1A),
                               size: 18,
                             ),
                             title: Text(
@@ -1511,14 +1567,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
           // ── PAINEL DE NAVEGAÇÃO ───────────────────────────────────────────
           // Quando o painel some, zera o notifier para os botões descerem
-          if (tc.routePoints.isEmpty || tc.suggestions.isNotEmpty)
+          if (tc.routePoints.isEmpty || tc.suggestions.isNotEmpty || _isFullScreen)
             Builder(builder: (_) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (_panelSizeNotifier.value != 0) _panelSizeNotifier.value = 0;
               });
               return const SizedBox.shrink();
             }),
-          if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty)
+          if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty && !_isFullScreen)
             // NavigationPanel é um DraggableScrollableSheet — deve ser filho
             // direto do Stack (sem Positioned) para funcionar corretamente
             NavigationPanel(
@@ -1572,7 +1628,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     _showReroutingBanner = false;
                   });
                   if (_currentPosition != null) {
-                    _moveNavigationCamera(_currentPosition!);
+                    _moveNavigationCamera(
+                      _currentPosition!,
+                      customDuration: const Duration(milliseconds: 1500),
+                      customCurve: Curves.fastOutSlowIn,
+                    );
                   }
                 } else {
                   _mapController.rotate(0);
@@ -1582,6 +1642,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 tc.toggleNavigation();
                 _mapController.rotate(0);
               },
+            ),
+
+          // ── HUD DE NAVEGAÇÃO FULLSCREEN ──────────────────────────────────
+          if (_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 16,
+              child: _FullscreenHud(
+                speedMs: _lastKnownSpeed,
+                heading: _heading,
+              ),
             ),
 
           // ── HUD DE ALERTAS PROATIVOS ──────────────────────────────────────
@@ -1603,10 +1674,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             valueListenable: _panelSizeNotifier,
             builder: (context, panelSize, child) {
               final screenH = MediaQuery.of(context).size.height;
-              final panelPixels = panelSize > 0
-                  ? (panelSize * screenH).clamp(0.0, screenH * 0.65)
-                  : 0.0;
-              final buttonBottom = panelPixels + 16;
+              final double buttonBottom;
+              if (_isFullScreen) {
+                buttonBottom = MediaQuery.of(context).padding.bottom + 16;
+              } else {
+                final panelPixels = panelSize > 0
+                    ? (panelSize * screenH).clamp(0.0, screenH * 0.65)
+                    : 0.0;
+                buttonBottom = panelPixels + 16;
+              }
 
               return Stack(
                 children: [
@@ -1618,6 +1694,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     bottom: buttonBottom,
                     child: Column(
                       children: [
+                        // Velocímetro — aparece apenas durante navegação
+                        if (tc.isNavigating) ...[
+                          _SpeedHud(speedMs: _lastKnownSpeed),
+                          const SizedBox(height: 10),
+                        ],
                         _LargeMapButton(
                           icon: Icons.add_rounded,
                           onPressed: () => _mapController.move(
@@ -1684,15 +1765,61 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
           // ── LOADING ROTA ──────────────────────────────────────────────────
           if (tc.isRouting)
-            Container(
-              color: Colors.black.withValues(alpha: 0.3),
-              child: const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.blueAccent,
-                  strokeWidth: 2.5,
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 72,
+              left: 24,
+              right: 24,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111318).withValues(alpha: 0.97),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: const Color(0xFF2563EB).withValues(alpha: 0.4),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                        blurRadius: 20,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 4),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF2563EB),
+                          strokeWidth: 2,
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Text(
+                        'Calculando rota...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
+
         ],
       ),
     );
@@ -1719,7 +1846,10 @@ class _LargeMapButton extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onPressed,
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onPressed();
+        },
         borderRadius: BorderRadius.circular(16),
         child: Ink(
           width: 56,
@@ -1770,3 +1900,251 @@ class LatLngTween extends Tween<LatLng> {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PONTEIRO DO PIN DE ENTREGA (triângulo na base do círculo)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PinPointerPainter extends CustomPainter {
+  const _PinPointerPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = ui.Paint()
+      ..color = color
+      ..style = ui.PaintingStyle.fill;
+
+    final path = ui.Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..lineTo(size.width, 0)
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PinPointerPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VELOCÍMETRO HUD — exibe velocidade em km/h durante a navegação
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SpeedHud extends StatelessWidget {
+  const _SpeedHud({required this.speedMs});
+
+  /// Velocidade em metros por segundo (vinda do GPS)
+  final double speedMs;
+
+  @override
+  Widget build(BuildContext context) {
+    final kmh = (speedMs * 3.6).round();
+
+    return Container(
+      width: 68,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111318).withValues(alpha: 0.93),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.1),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$kmh',
+            style: TextStyle(
+              color: kmh > 80
+                  ? const Color(0xFFFF3B30)
+                  : kmh > 60
+                      ? const Color(0xFFFF9500)
+                      : Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'km/h',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.4),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  HUD DE VELOCIDADE EM FULLSCREEN (Glassmorphism + hora + bússola)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _FullscreenHud extends StatefulWidget {
+  const _FullscreenHud({required this.speedMs, required this.heading});
+  final double speedMs;
+  final double heading;
+
+  @override
+  State<_FullscreenHud> createState() => _FullscreenHudState();
+}
+
+class _FullscreenHudState extends State<_FullscreenHud> {
+  late Timer _clockTimer;
+  String _timeString = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _updateTime();
+    _clockTimer = Timer.periodic(const Duration(seconds: 10), (_) => _updateTime());
+  }
+
+  @override
+  void dispose() {
+    _clockTimer.cancel();
+    super.dispose();
+  }
+
+  void _updateTime() {
+    final now = DateTime.now();
+    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    if (_timeString != timeStr) {
+      setState(() => _timeString = timeStr);
+    }
+  }
+
+  String _cardinal(double heading) {
+    const dirs = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
+    return dirs[((heading + 22.5) / 45).floor() % 8];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final kmh = (widget.speedMs * 3.6).round();
+    final speedColor = kmh > 80
+        ? AppColors.danger
+        : kmh > 60
+            ? AppColors.attention
+            : Colors.white;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.bgPanel.withValues(alpha: 0.75),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.12),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // Linha superior: Hora + Direção cardinal
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.schedule_rounded,
+                    size: 11,
+                    color: AppColors.textTertiary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _timeString,
+                    style: TextStyle(
+                      color: AppColors.textContent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 1.5,
+                    height: 12,
+                    color: AppColors.divider,
+                  ),
+                  const SizedBox(width: 12),
+                  Icon(
+                    Icons.explore_rounded,
+                    size: 11,
+                    color: AppColors.blue,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _cardinal(widget.heading),
+                    style: const TextStyle(
+                      color: AppColors.blueMid,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // Velocidade
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    '$kmh',
+                    style: TextStyle(
+                      color: speedColor,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'km/h',
+                    style: TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

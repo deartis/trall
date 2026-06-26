@@ -115,6 +115,27 @@ class ProactiveAlertHud extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              // Badge de alertas adicionais
+              if (ahead.length > 1)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  child: Text(
+                    '+${ahead.length - 1}',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               Icon(
                 Icons.chevron_right_rounded,
                 color: Colors.white.withValues(alpha: 0.3),
@@ -127,6 +148,7 @@ class ProactiveAlertHud extends StatelessWidget {
     );
   }
 
+  // Retorna TODOS os alertas à frente (para o badge de contagem)
   List<_AlertEntry> _findAheadAlerts(LatLng pos) {
     final results = <_AlertEntry>[];
 
@@ -135,8 +157,6 @@ class ProactiveAlertHud extends StatelessWidget {
       for (final m in ofType) {
         final dist = _distanceTo(pos, m.position);
         if (dist < _dismissRangeMeters || dist > _alertRangeMeters) continue;
-
-        // Verifica se está à frente na rota (não atrás)
         if (!_isAhead(pos, m.position)) continue;
 
         results.add(_AlertEntry(
@@ -150,7 +170,7 @@ class ProactiveAlertHud extends StatelessWidget {
     }
 
     results.sort((a, b) => a.distance.compareTo(b.distance));
-    return results.take(1).toList();
+    return results; // retorna TODOS (para o badge)
   }
 
   bool _isAhead(LatLng pos, LatLng markerPos) {

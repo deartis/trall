@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
+import '../core/app_colors.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../controllers/truck_controller.dart';
 import '../screens/profile_screen.dart';
+import '../screens/settings_screen.dart';
 import '../widgets/recent_destinations.dart';
 import '../features/route/models/delivery_stop.dart';
 import '../features/route/screens/route_manager_screen.dart';
@@ -37,12 +39,7 @@ class AppDrawer extends StatelessWidget {
     final currentProfile = tc.truckProfile;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    // Gamificação — placeholder
-    const int level = 1;
-    const int xp = 0;
-    const double xpProgress = 0.0;
-    const String levelLabel = 'Novato';
-    const String xpLabel = '$xp / 100 XP';
+
 
 
     return Drawer(
@@ -50,10 +47,10 @@ class AppDrawer extends StatelessWidget {
       backgroundColor: Colors.transparent,
       child: Container(
         decoration: const BoxDecoration(
-          color: Color(0xFF0B0E17),
+          color: AppColors.bgDeep,
           border: Border(
             right: BorderSide(
-              color: Color(0xFFE07B1A),
+              color: AppColors.amber,
               width: 0.5,
             ),
           ),
@@ -73,16 +70,16 @@ class AppDrawer extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE07B1A).withValues(alpha: 0.1),
+                        color: AppColors.amberSubtle,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: const Color(0xFFE07B1A).withValues(alpha: 0.3),
+                          color: AppColors.amberBorder,
                         ),
                       ),
                       child: const Text(
                         'TRALL',
                         style: TextStyle(
-                          color: Color(0xFFE07B1A),
+                          color: AppColors.amber,
                           fontSize: 18,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 3,
@@ -120,17 +117,17 @@ class AppDrawer extends StatelessWidget {
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF1A2035), Color(0xFF0E1320)],
+                        colors: [AppColors.bgGradientTop, AppColors.bgAmber],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: const Color(0xFFE07B1A).withValues(alpha: 0.2),
+                        color: AppColors.amberBorder,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFE07B1A).withValues(alpha: 0.06),
+                          color: AppColors.amber.withValues(alpha: 0.06),
                           blurRadius: 20,
                           offset: const Offset(0, 4),
                         ),
@@ -152,16 +149,15 @@ class AppDrawer extends StatelessWidget {
                                     shape: BoxShape.circle,
                                     gradient: const LinearGradient(
                                       colors: [
-                                        Color(0xFFE07B1A),
-                                        Color(0xFFFF9500)
+                                        AppColors.amber,
+                                        AppColors.attention,
                                       ],
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
                                     ),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: const Color(0xFFE07B1A)
-                                            .withValues(alpha: 0.4),
+                                        color: AppColors.amber.withValues(alpha: 0.4),
                                         blurRadius: 10,
                                         offset: const Offset(0, 3),
                                       ),
@@ -170,7 +166,7 @@ class AppDrawer extends StatelessWidget {
                                   padding: const EdgeInsets.all(2),
                                   child: CircleAvatar(
                                     radius: 24,
-                                    backgroundColor: const Color(0xFF0E1320),
+                                    backgroundColor: AppColors.bgAmber,
                                     backgroundImage: (isSignedIn &&
                                             user?.photoUrl != null)
                                         ? NetworkImage(user!.photoUrl!)
@@ -185,7 +181,7 @@ class AppDrawer extends StatelessWidget {
                                                     .person_outline_rounded,
                                             size: 24,
                                             color: isSignedIn
-                                                ? const Color(0xFFE07B1A)
+                                                ? AppColors.amber
                                                 : Colors.white38,
                                           ),
                                   ),
@@ -194,16 +190,16 @@ class AppDrawer extends StatelessWidget {
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFE07B1A),
+                                    color: AppColors.amber,
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: const Color(0xFF0E1320),
+                                      color: AppColors.bgAmber,
                                       width: 1.5,
                                     ),
                                   ),
                                   child: const Center(
                                     child: Text(
-                                      '$level',
+                                      '1',
                                       style: TextStyle(
                                         color: Colors.white,
                                         fontSize: 10,
@@ -238,30 +234,27 @@ class AppDrawer extends StatelessWidget {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFE07B1A)
-                                              .withValues(alpha: 0.15),
+                                          color: AppColors.amberMuted,
                                           borderRadius:
                                               BorderRadius.circular(4),
                                           border: Border.all(
-                                            color: const Color(0xFFE07B1A)
-                                                .withValues(alpha: 0.3),
+                                            color: AppColors.amberBorder,
                                           ),
                                         ),
                                         child: const Text(
-                                          '⭐ $levelLabel',
+                                          '⭐ Motorista',
                                           style: TextStyle(
-                                            color: Color(0xFFE07B1A),
+                                            color: AppColors.amber,
                                             fontSize: 10,
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 6),
-                                      Text(
-                                        xpLabel,
+                                      const Text(
+                                        '0 / 100 XP',
                                         style: TextStyle(
-                                          color:
-                                              Colors.white.withValues(alpha: 0.35),
+                                          color: Colors.white38,
                                           fontSize: 10,
                                         ),
                                       ),
@@ -278,18 +271,43 @@ class AppDrawer extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // Barra de XP
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: xpProgress,
-                            minHeight: 5,
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.07),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFFE07B1A),
+                        // Linha de XP / Em breve
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.emoji_events_outlined,
+                              color: Colors.white.withValues(alpha: 0.3),
+                              size: 14,
                             ),
-                          ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Sistema de progresso em breve',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.3),
+                                fontSize: 11,
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.amberSubtle,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: AppColors.amberBorder,
+                                ),
+                              ),
+                              child: const Text(
+                                'EM BREVE',
+                                style: TextStyle(
+                                  color: AppColors.amber,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         // Info veículo
@@ -308,7 +326,7 @@ class AppDrawer extends StatelessWidget {
                             children: [
                               const Icon(
                                 Icons.local_shipping_rounded,
-                                color: Color(0xFFE07B1A),
+                                color: AppColors.amber,
                                 size: 14,
                               ),
                               const SizedBox(width: 6),
@@ -341,7 +359,7 @@ class AppDrawer extends StatelessWidget {
                   label: tc.deliveryStops.isNotEmpty
                       ? 'Ver / Reorganizar Paradas'
                       : 'Criar Rota com Paradas',
-                  color: const Color(0xFF2563EB),
+                  color: AppColors.blue,
                   onTap: () async {
                     Navigator.pop(context);
                     final result =
@@ -418,7 +436,15 @@ class AppDrawer extends StatelessWidget {
               _DrawerNavItem(
                 icon: Icons.settings_outlined,
                 label: 'Configurações',
-                onTap: () => Navigator.pop(context),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SettingsScreen(),
+                    ),
+                  );
+                },
               ),
               SizedBox(height: safeBottom + 16),
             ],

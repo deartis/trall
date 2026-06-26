@@ -10,6 +10,8 @@ import '../models/route_step.dart';
 import '../models/truck_profile.dart';
 import '../models/truck_route.dart';
 import '../services/api_service.dart';
+import '../services/cep_service.dart';
+import '../services/preferences_service.dart';
 import '../services/road_analysis_service.dart';
 import '../services/truck_profile_service.dart';
 import '../services/tts_service.dart';
@@ -62,6 +64,7 @@ class TruckController extends ChangeNotifier {
   Timer? _drivingTimer;
   int _drivingSeconds = 0;
   bool _isFatigueAlertTriggered = false;
+  DateTime? _fatigueStartedAt; // Timestamp do início da sessão de direção
   static const int _fatigueLimitSeconds = 5 * 3600 + 30 * 60; // 5h30m (Lei 13.103)
 
   double _distance = 0;
@@ -180,9 +183,13 @@ class TruckController extends ChangeNotifier {
     _isNavigating = !_isNavigating;
     if (_isNavigating) {
       _currentStepIndex = 0;
-      _drivingSeconds = 0;
-      _isFatigueAlertTriggered = false;
-      
+
+      // Restaura segundos de fadiga persistidos (caso o app tenha fechado
+      // enquanto o motorista estava dirigindo).
+      _drivingSeconds = PreferencesService.instance.restoreFatigueSeconds();
+      _fatigueStartedAt = DateTime.now();
+      _isFatigueAlertTriggered = _drivingSeconds >= _fatigueLimitSeconds;
+
       final step = nextStep;
       if (step != null) {
         TtsService.instance.speak(
@@ -190,7 +197,7 @@ class TruckController extends ChangeNotifier {
       } else {
         TtsService.instance.speak('Navegação iniciada.');
       }
-      
+
       // Inicia o timer de fadiga
       _drivingTimer?.cancel();
       _drivingTimer = Timer.periodic(const Duration(seconds: 1), _onDrivingTick);
@@ -203,13 +210,22 @@ class TruckController extends ChangeNotifier {
 
   void _onDrivingTick(Timer timer) {
     _drivingSeconds++;
-    
+
+    // Persiste a cada 30 segundos para não sobrecarregar o I/O.
+    // Se o app fechar entre dois saves, perde no máximo 30s — aceitável.
+    if (_drivingSeconds % 30 == 0 && _fatigueStartedAt != null) {
+      PreferencesService.instance.saveFatigueState(
+        seconds: _drivingSeconds,
+        startedAt: _fatigueStartedAt!,
+      );
+    }
+
     // Dispara alerta ao atingir o limite (5h30m)
     if (_drivingSeconds >= _fatigueLimitSeconds && !_isFatigueAlertTriggered) {
       _isFatigueAlertTriggered = true;
       TtsService.instance.speak(
         'Atenção motorista. Você atingiu o tempo limite de direção contínua estabelecido por lei. '
-        'Por favor, procure um local seguro para descanso o mais rápido possível.'
+        'Por favor, procure um local seguro para descanso o mais rápido possível.',
       );
     }
     notifyListeners();
@@ -246,6 +262,18 @@ class TruckController extends ChangeNotifier {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  BUSCA DE ENDEREÇOS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  static const _httpTimeout = Duration(seconds: 15);
+
+  /// Busca sugestões de endereço.
+  ///
+  /// - Se [query] for um CEP (8 dígitos), consulta ViaCEP e retorna
+  ///   o endereço formatado como sugestão única.
+  /// - Caso contrário, usa Nominatim com viewbox (priorização por
+  ///   proximidade, SEM bounded=1 que suprime resultados distantes).
   Future<void> fetchSuggestions(String query, {LatLng? userLocation}) async {
     if (query.length < 3) {
       _suggestions = [];
@@ -253,29 +281,49 @@ class TruckController extends ChangeNotifier {
       return;
     }
 
+    // ── Detecção de CEP ──────────────────────────────────────────
+    if (CepService.isCep(query)) {
+      try {
+        final result = await CepService.lookup(query);
+        if (result != null) {
+          _suggestions = [result.formattedAddress];
+          notifyListeners();
+          return;
+        }
+      } catch (_) {}
+      // Se falhar, deixa cair para o Nominatim normal
+    }
+
+    // ── Nominatim ────────────────────────────────────────────────
     try {
-      String url = 'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5';
-      
+      final encodedQuery = Uri.encodeComponent(query);
+      String url =
+          'https://nominatim.openstreetmap.org/search'
+          '?q=$encodedQuery&format=json&limit=6&countrycodes=br';
+
       if (userLocation != null) {
-        // Cria um raio de busca de aproximadamente 50km ao redor do usuário
+        // viewbox apenas PRIORIZA a região próxima — não bloqueia
+        // resultados fora dela (diferente de bounded=1 que suprimia).
         final lat = userLocation.latitude;
         final lon = userLocation.longitude;
-        final offset = 0.5; // ~55km em graus
-        final viewBox = '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
-        
-        // bounded=1 força a priorizar absurdamente essa região
-        url += '&viewbox=$viewBox&bounded=1';
+        const offset = 1.5; // ~150km em graus (raio maior = menos falsos negativos)
+        final viewBox =
+            '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
+        url += '&viewbox=$viewBox';
       }
 
-      final response = await http.get(Uri.parse(url), headers: {'User-Agent': 'TrallZeroApp'});
-      
+      final response = await http
+          .get(Uri.parse(url), headers: {'User-Agent': 'TrallApp/1.0'})
+          .timeout(_httpTimeout);
+
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
-        _suggestions = data.map((item) => item['display_name'] as String).toList();
+        _suggestions =
+            data.map((item) => item['display_name'] as String).toList();
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('Erro ao buscar sugestões: $e');
+      debugPrint('[Search] Erro ao buscar sugestões: $e');
     }
   }
 
@@ -284,22 +332,71 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Geocodifica [address] e configura como destino.
+  ///
+  /// Fluxo de fallback:
+  ///   1. Se for CEP → ViaCEP + geocode direto (mais preciso)
+  ///   2. Nominatim search
+  ///   3. geocoding package (fallback final)
   Future<LatLng?> searchAddress(String address, LatLng userLocation) async {
     try {
       _isRouting = true;
       _suggestions = [];
       notifyListeners();
 
-      List<Location> locations = await locationFromAddress(address);
+      // ── 1. Tentativa via CEP ───────────────────────────────────
+      if (CepService.isCep(address)) {
+        final cepResult = await CepService.lookup(address);
+        if (cepResult != null) {
+          final coords = await CepService.geocode(cepResult);
+          if (coords != null) {
+            await setDestination(coords, userLocation);
+            await RecentDestinations.saveDestination(
+                '${address.replaceAll(RegExp(r'[^\d]'), '').replaceRange(5, 8, '-')} — ${cepResult.shortAddress}');
+            return coords;
+          }
+        }
+      }
+
+      // ── 2. Nominatim direto ────────────────────────────────────
+      try {
+        final encoded = Uri.encodeComponent(address);
+        final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/search'
+          '?q=$encoded&format=json&limit=1&countrycodes=br',
+        );
+        final response = await http
+            .get(uri, headers: {'User-Agent': 'TrallApp/1.0'})
+            .timeout(_httpTimeout);
+
+        if (response.statusCode == 200) {
+          final List data = json.decode(response.body);
+          if (data.isNotEmpty) {
+            final lat = double.tryParse(data[0]['lat'] as String? ?? '');
+            final lon = double.tryParse(data[0]['lon'] as String? ?? '');
+            if (lat != null && lon != null) {
+              final point = LatLng(lat, lon);
+              await setDestination(point, userLocation);
+              await RecentDestinations.saveDestination(address);
+              return point;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[Search] Nominatim falhou, tentando geocoding pkg: $e');
+      }
+
+      // ── 3. Fallback: geocoding package ────────────────────────
+      final locations = await locationFromAddress(address);
       if (locations.isNotEmpty) {
-        final point = LatLng(locations.first.latitude, locations.first.longitude);
+        final point =
+            LatLng(locations.first.latitude, locations.first.longitude);
         await setDestination(point, userLocation);
-        // Persiste o destino buscado com sucesso
         await RecentDestinations.saveDestination(address);
         return point;
       }
     } catch (e) {
-      debugPrint('Erro na busca de endereço: $e');
+      debugPrint('[Search] Erro geral na busca de endereço: $e');
     } finally {
       _isRouting = false;
       notifyListeners();
@@ -444,7 +541,9 @@ class TruckController extends ChangeNotifier {
       final url = 'https://router.project-osrm.org/route/v1/driving/$coordinates'
           '?overview=full&geometries=geojson&alternatives=true&steps=true$excludeParam';
 
-      final response = await http.get(Uri.parse(url));
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(_httpTimeout);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List routesData = data['routes'] as List;
@@ -578,7 +677,10 @@ class TruckController extends ChangeNotifier {
     _currentStepIndex = 0;
     _drivingTimer?.cancel();
     _drivingSeconds = 0;
+    _fatigueStartedAt = null;
     _isFatigueAlertTriggered = false;
+    // Limpa o estado persistido ao encerrar a rota conscientemente
+    PreferencesService.instance.clearFatigueState();
     notifyListeners();
   }
 

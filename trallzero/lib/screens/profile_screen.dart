@@ -133,11 +133,7 @@ class ProfileScreen extends StatelessWidget {
     final user = auth.currentUser;
     final currentProfile = tc.truckProfile;
 
-    // Gamificação — placeholder
-    const int level = 1;
-    const double xpProgress = 0.0;
-    const String levelLabel = 'Novato';
-    const String xpLabel = '0 / 100 XP';
+    // Gamificação — placeholder (sem variáveis desnecessárias)
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0E17),
@@ -257,10 +253,10 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                 ],
                               ),
-                              child: const Center(
+                              child: Center(
                                 child: Text(
-                                  '$level',
-                                  style: TextStyle(
+                                  '1',
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w900,
@@ -306,9 +302,9 @@ class ProfileScreen extends StatelessWidget {
                               color: const Color(0xFFE07B1A).withValues(alpha: 0.3),
                             ),
                           ),
-                          child: const Text(
-                            '⭐  $levelLabel',
-                            style: TextStyle(
+                          child: Text(
+                            '⭐  Motorista',
+                            style: const TextStyle(
                               color: Color(0xFFE07B1A),
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -329,50 +325,65 @@ class ProfileScreen extends StatelessWidget {
             sliver: SliverList(
               delegate: SliverChildListDelegate([
 
-                // ── Card de XP ──────────────────────────────────────
+                // ── Card de XP (Em breve) ───────────────────────────────────
                 _SectionCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Progresso',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          Text(
-                            xpLabel,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.4),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: LinearProgressIndicator(
-                          value: xpProgress,
-                          minHeight: 8,
-                          backgroundColor: Colors.white.withValues(alpha: 0.07),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFFE07B1A),
-                          ),
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE07B1A).withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.emoji_events_outlined,
+                          color: Color(0xFFE07B1A),
+                          size: 20,
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Crie marcações e confirme alertas para ganhar XP e subir de nível.',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 11,
-                          height: 1.5,
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Sistema de Progresso',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Em breve — ganhe XP e suba de nível ao usar o Trall.',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.35),
+                                fontSize: 11,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE07B1A).withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: const Color(0xFFE07B1A).withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: const Text(
+                          'EM BREVE',
+                          style: TextStyle(
+                            color: Color(0xFFE07B1A),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                          ),
                         ),
                       ),
                     ],
@@ -562,7 +573,7 @@ class ProfileScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
-                              Icons.local_shipping_rounded,
+                              _truckProfileIcon(profile.type),
                               color: isSelected
                                   ? const Color(0xFFE07B1A)
                                   : Colors.white.withValues(alpha: 0.4),
@@ -720,3 +731,14 @@ class _Divider extends StatelessWidget {
     );
   }
 }
+
+// ───────────────────────────────────────────────────────────────
+//  Ícone distinto por tipo de perfil de veículo
+// ───────────────────────────────────────────────────────────────
+IconData _truckProfileIcon(TruckProfileType type) => switch (type) {
+  TruckProfileType.lightTruck => Icons.local_shipping_rounded,      // Caminhão Leve
+  TruckProfileType.truck      => Icons.fire_truck_rounded,           // Truck (3 eixos)
+  TruckProfileType.carreta    => Icons.rv_hookup_rounded,            // Carreta
+  TruckProfileType.bitrem     => Icons.directions_bus_filled_rounded, // Bitrem
+  TruckProfileType.rodotrem   => Icons.train_rounded,                // Rodotrem (trem de estrada)
+};
