@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -13,11 +13,12 @@ import '../services/api_service.dart';
 import '../services/cep_service.dart';
 import '../services/preferences_service.dart';
 import '../services/road_analysis_service.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import '../services/truck_profile_service.dart';
 import '../services/tts_service.dart';
 import '../services/poi_service.dart';
 
-import '../features/route/models/delivery_stop.dart';
+import '../models/delivery_stop.dart';
 import '../widgets/recent_destinations.dart';
 
 
@@ -201,9 +202,15 @@ class TruckController extends ChangeNotifier {
       // Inicia o timer de fadiga
       _drivingTimer?.cancel();
       _drivingTimer = Timer.periodic(const Duration(seconds: 1), _onDrivingTick);
+
+      // Inicia o serviço em segundo plano
+      FlutterBackgroundService().startService();
     } else {
       TtsService.instance.stop();
       _drivingTimer?.cancel();
+
+      // Desliga o serviço em segundo plano
+      FlutterBackgroundService().invoke('stopService');
     }
     notifyListeners();
   }
@@ -682,6 +689,8 @@ class TruckController extends ChangeNotifier {
     _drivingSeconds = 0;
     _fatigueStartedAt = null;
     _isFatigueAlertTriggered = false;
+    // Desliga o serviço em segundo plano
+    FlutterBackgroundService().invoke('stopService');
     // Limpa o estado persistido ao encerrar a rota conscientemente
     PreferencesService.instance.clearFatigueState();
     notifyListeners();

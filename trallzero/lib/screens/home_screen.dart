@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../../screens/map_screen.dart';
-import '../../../controllers/truck_controller.dart';
-import '../../../widgets/app_drawer.dart';
+import 'map_screen.dart';
+import '../controllers/truck_controller.dart';
+import '../widgets/app_drawer.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});

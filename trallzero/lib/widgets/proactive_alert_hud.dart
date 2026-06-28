@@ -210,7 +210,7 @@ class ProactiveAlertHud extends StatelessWidget {
     MarkerType.weighStation => '⚖️  Balança à frente',
     MarkerType.restriction  => '🚫  Restrição à frente',
     MarkerType.danger       => '⚠️  Perigo à frente',
-    MarkerType.police       => '🚔  Fiscalização à frente',
+    MarkerType.police       => '🚔  Polícia à frente',
     MarkerType.speedCamera  => '📸  Radar à frente',
     _                       => 'Alerta à frente',
   };

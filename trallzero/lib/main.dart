@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/app_theme.dart';
-import 'features/home/screens/home_screen.dart';
-import 'features/route/screens/route_manager_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/route_manager_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/login_screen.dart';
@@ -11,7 +11,9 @@ import 'services/preferences_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/truck_profile_service.dart';
+import 'services/background_navigation_service.dart';
 import 'models/truck_profile.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 
 void main() async {
@@ -19,6 +21,7 @@ void main() async {
   await PreferencesService.instance.init();
   await ApiService.instance.init();
   await AuthService.instance.tryRestoreSession();
+  await BackgroundNavigationService.initialize();
   
   final defaultProfileId = PreferencesService.instance.defaultProfileId;
   final profile = TruckProfilePresets.all.firstWhere(
@@ -39,8 +42,35 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      final tc = Provider.of<TruckController>(context, listen: false);
+      if (!tc.isNavigating || tc.routePoints.isEmpty) {
+        FlutterBackgroundService().invoke('stopService');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

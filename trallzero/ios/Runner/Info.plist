@@ -30,6 +30,10 @@
 	<string>O Trall Zero usa sua localização para acompanhar a navegação em tempo real.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>O Trall Zero usa sua localização para manter a navegação ativa durante as entregas.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

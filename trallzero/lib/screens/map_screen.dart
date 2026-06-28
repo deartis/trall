@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -17,11 +17,11 @@ import '../services/ocr_service.dart';
 import '../widgets/navigation_marker.dart';
 import '../widgets/proactive_alert_hud.dart';
 import '../controllers/truck_controller.dart';
-import '../map_layers/road_analysis_layer.dart';
+import '../widgets/road_analysis_layer.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
 import '../widgets/navigation_panel.dart';
-import '../features/route/models/delivery_stop.dart';
+import '../models/delivery_stop.dart';
 
 
 
@@ -169,9 +169,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       _mapController.rotate(0);
       _startCompassUpdates();
+
     });
 
     _initLocation();

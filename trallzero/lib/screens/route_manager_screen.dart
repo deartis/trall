@@ -1,12 +1,12 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../../core/app_snackbar.dart';
-import '../../../controllers/truck_controller.dart';
-import '../../../services/ocr_service.dart';
-import '../../../services/location_service.dart';
+import '../core/app_snackbar.dart';
+import '../controllers/truck_controller.dart';
+import '../services/ocr_service.dart';
+import '../services/location_service.dart';
 import '../models/delivery_stop.dart';
 
 class RouteManagerScreen extends StatefulWidget {
