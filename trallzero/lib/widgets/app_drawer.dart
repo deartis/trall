@@ -356,13 +356,13 @@ class AppDrawer extends StatelessWidget {
                   color: AppColors.blue,
                   onTap: () async {
                     Navigator.pop(context);
-                    final result =
-                        await Navigator.pushNamed<List<DeliveryStop>>(
+                    final resultObj = await Navigator.pushNamed(
                       context,
                       '/route_manager',
                     );
 
-                    if (result != null && context.mounted) {
+                    if (resultObj is List<DeliveryStop> && context.mounted) {
+                      final result = resultObj;
                       LatLng startLoc = const LatLng(-22.9068, -43.1729);
                       try {
                         if (await LocationService.handlePermission()) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -63,6 +64,8 @@ class _NavigationPanelState extends State<NavigationPanel> {
   static const double _snapMax = 0.60;
 
   bool _isSharingRoute = false;
+  bool _showSwipeHint = false;
+  Timer? _hintTimer;
 
   // Converte m/s para km/h
   double get _kmh => widget.speed * 3.6;
@@ -82,6 +85,13 @@ class _NavigationPanelState extends State<NavigationPanel> {
       if (mounted && _sheetController.isAttached) {
         widget.onPanelSizeChanged?.call(_sheetController.size);
       }
+      // Exibe hint de swipe por 3s na primeira vez que o painel aparece
+      if (mounted) {
+        setState(() => _showSwipeHint = true);
+        _hintTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _showSwipeHint = false);
+        });
+      }
     });
   }
 
@@ -94,6 +104,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
   void dispose() {
     _sheetController.removeListener(_onSheetSizeChanged);
     _sheetController.dispose();
+    _hintTimer?.cancel();
     super.dispose();
   }
 
@@ -173,18 +184,39 @@ class _NavigationPanelState extends State<NavigationPanel> {
             physics: const ClampingScrollPhysics(),
             children: [
               // ── Handle ────────────────────────────────────────────
-              Center(
-                child: Container(
-                  width: 48,
-                  height: 5,
-                  margin: const EdgeInsets.only(top: 10, bottom: 6),
-                  decoration: BoxDecoration(
-                    color: isNavigating
-                        ? AppColors.safeBorder
-                        : AppColors.handle,
-                    borderRadius: BorderRadius.circular(3),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Hint educativo: "Arraste para detalhes"
+                  AnimatedOpacity(
+                    opacity: _showSwipeHint ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 400),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '↑  Arraste para mais detalhes',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.35),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  // Handle pill
+                  Container(
+                    width: 48,
+                    height: 5,
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    decoration: BoxDecoration(
+                      color: isNavigating
+                          ? AppColors.safeBorder
+                          : AppColors.handle,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ],
               ),
 
               // ════════════════════════════════════════════════════
@@ -284,6 +316,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                               fontWeight: FontWeight.w900,
                               letterSpacing: -0.8,
                               height: 1,
+                              fontFeatures: [ui.FontFeature.tabularFigures()],
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1089,6 +1122,7 @@ class _Speedometer extends StatelessWidget {
             fontWeight: FontWeight.w900,
             height: 1,
             letterSpacing: -0.5,
+            fontFeatures: const [ui.FontFeature.tabularFigures()],
           ),
         ),
         Text(

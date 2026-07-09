@@ -1,13 +1,23 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
 import '../models/truck_profile.dart';
 
+/// Marcador de navegação do veículo no mapa.
+///
+/// Exibe uma seta elegante apontando sempre para CIMA — a rotação
+/// correta é aplicada pelo [Marker] pai via `rotate: true`, que
+/// sincroniza com o heading do mapa.
+///
+/// O anel pulsante muda de velocidade e cor conforme a speed:
+///   • parado  → âmbar, pulso lento
+///   • normal  → verde, pulso médio
+///   • rápido  → laranja, pulso rápido
+///   • perigoso → vermelho, pulso muito rápido
 class NavigationMarker extends StatefulWidget {
   final double size;
   final double speed; // em m/s
   final TruckProfileType profileType;
-  final double heading; // em graus
+  final double heading; // em graus — mantido para compatibilidade, mas não usado aqui
 
   const NavigationMarker({
     super.key,
@@ -35,10 +45,10 @@ class _NavigationMarkerState extends State<NavigationMarker>
       duration: _getPulseDuration(widget.speed),
     )..repeat();
 
-    _scaleAnimation = Tween<double>(begin: 0.7, end: 1.6).animate(
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.8).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
     );
-    _opacityAnimation = Tween<double>(begin: 0.6, end: 0.0).animate(
+    _opacityAnimation = Tween<double>(begin: 0.55, end: 0.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
     );
   }
@@ -56,10 +66,10 @@ class _NavigationMarkerState extends State<NavigationMarker>
 
   Duration _getPulseDuration(double speed) {
     final kmh = speed * 3.6;
-    if (kmh < 1.0) return const Duration(milliseconds: 3000); // parado (lento)
-    if (kmh <= 60.0) return const Duration(milliseconds: 1800); // normal
-    if (kmh <= 90.0) return const Duration(milliseconds: 1200); // rápido
-    return const Duration(milliseconds: 800); // muito rápido/perigo
+    if (kmh < 1.0) return const Duration(milliseconds: 3000);
+    if (kmh <= 60.0) return const Duration(milliseconds: 1800);
+    if (kmh <= 90.0) return const Duration(milliseconds: 1200);
+    return const Duration(milliseconds: 800);
   }
 
   Color get _markerColor {
@@ -80,269 +90,160 @@ class _NavigationMarkerState extends State<NavigationMarker>
   Widget build(BuildContext context) {
     final size = widget.size;
     final color = _markerColor;
-    final headingRad = widget.heading * math.pi / 180.0;
 
     return SizedBox(
       width: size,
       height: size,
-      child: Transform.rotate(
-        angle: headingRad,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Anel pulsante externo
-            AnimatedBuilder(
-              animation: _pulseController,
-              builder: (context, child) => Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Opacity(
-                  opacity: _opacityAnimation.value,
-                  child: Container(
-                    width: size * 0.55,
-                    height: size * 0.55,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: color,
-                        width: 2,
-                      ),
-                    ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // ── Anel pulsante externo ─────────────────────────────────
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, child) => Transform.scale(
+              scale: _scaleAnimation.value,
+              child: Opacity(
+                opacity: _opacityAnimation.value,
+                child: Container(
+                  width: size * 0.52,
+                  height: size * 0.52,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 2),
                   ),
                 ),
               ),
             ),
+          ),
 
-            // Efeito de brilho/aura ao fundo
-            Container(
-              width: size * 0.8,
-              height: size * 0.8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.4),
-                    blurRadius: 15,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
+          // ── Aura/glow ao fundo ────────────────────────────────────
+          Container(
+            width: size * 0.72,
+            height: size * 0.72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.45),
+                  blurRadius: 14,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
+          ),
 
-            // O Veículo Estilizado (Custom Painter)
-            CustomPaint(
-              size: Size(size * 0.65, size * 0.85),
-              painter: _VehiclePainter(
-                color: color,
-                profileType: widget.profileType,
-              ),
-            ),
-          ],
-        ),
+          // ── Seta de navegação ─────────────────────────────────────
+          CustomPaint(
+            size: Size(size * 0.60, size * 0.72),
+            painter: _ArrowPainter(color: color),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _VehiclePainter extends CustomPainter {
-  final Color color;
-  final TruckProfileType profileType;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Seta de navegação estilo "teardrop/chevron"
+//  A PONTA aponta sempre para CIMA (y=0). O Marker pai com rotate:true
+//  e o mapa rotacionado cuidam de apontar para a direção correta.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  _VehiclePainter({required this.color, required this.profileType});
+class _ArrowPainter extends CustomPainter {
+  final Color color;
+  _ArrowPainter({required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    // Linha de detalhe interna/borda para profundidade
-    final borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.8)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final detailPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.35)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
     final double w = size.width;
     final double h = size.height;
 
-    switch (profileType) {
-      case TruckProfileType.lightTruck:
-        _drawLightTruck(canvas, w, h, paint, borderPaint, detailPaint);
-        break;
-      case TruckProfileType.truck:
-        _drawRigidTruck(canvas, w, h, paint, borderPaint, detailPaint);
-        break;
-      case TruckProfileType.carreta:
-        _drawCarreta(canvas, w, h, paint, borderPaint, detailPaint);
-        break;
-      case TruckProfileType.bitrem:
-        _drawBitrem(canvas, w, h, paint, borderPaint, detailPaint);
-        break;
-      case TruckProfileType.rodotrem:
-        _drawRodotrem(canvas, w, h, paint, borderPaint, detailPaint);
-        break;
-    }
-  }
+    // ── Sombra projetada (profundidade) ───────────────────────────
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
 
-  void _drawCab(Canvas canvas, double x, double y, double w, double h, Paint paint, Paint borderPaint) {
-    // A rounded rectangle representing the cabin
-    final RRect cabRRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(x, y, w, h),
-      Radius.circular(w * 0.25),
-    );
-    canvas.drawRRect(cabRRect, paint);
-    canvas.drawRRect(cabRRect, borderPaint);
+    final arrowPath = _buildArrowPath(w, h);
+    canvas.save();
+    canvas.translate(1.5, 2.5);
+    canvas.drawPath(arrowPath, shadowPaint);
+    canvas.restore();
 
-    // Windshield (Para-brisa)
-    final glassPaint = Paint()
-      ..color = const Color(0xFF8CE3FF)
+    // ── Fill principal (gradiente linear vertical) ─────────────────
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color.lerp(color, Colors.white, 0.25)!,
+          color,
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, w, h))
       ..style = PaintingStyle.fill;
-    final glassBorder = Paint()
-      ..color = Colors.white.withValues(alpha: 0.6)
+
+    canvas.drawPath(arrowPath, fillPaint);
+
+    // ── Borda branca sutil (legibilidade sobre qualquer mapa) ─────
+    final borderPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.85)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8;
-    
-    // Windshield at the top/front of the cab
-    final RRect glassRRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(x + w * 0.15, y + h * 0.12, w * 0.7, h * 0.22),
-      Radius.circular(w * 0.08),
-    );
-    canvas.drawRRect(glassRRect, glassPaint);
-    canvas.drawRRect(glassRRect, glassBorder);
+      ..strokeWidth = 1.6
+      ..strokeJoin = StrokeJoin.round;
 
-    // Side mirrors (Retrovisores)
-    final mirrorPaint = Paint()
-      ..color = paint.color
-      ..style = PaintingStyle.fill;
-    
-    // Left mirror
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x - w * 0.12, y + h * 0.25, w * 0.1, h * 0.22),
-        const Radius.circular(1),
-      ),
-      mirrorPaint,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x - w * 0.12, y + h * 0.25, w * 0.1, h * 0.22),
-        const Radius.circular(1),
-      ),
-      borderPaint,
-    );
+    canvas.drawPath(arrowPath, borderPaint);
 
-    // Right mirror
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x + w * 1.02, y + h * 0.25, w * 0.1, h * 0.22),
-        const Radius.circular(1),
-      ),
-      mirrorPaint,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x + w * 1.02, y + h * 0.25, w * 0.1, h * 0.22),
-        const Radius.circular(1),
-      ),
-      borderPaint,
-    );
-  }
-
-  void _drawTrailer(Canvas canvas, double x, double y, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    final RRect trailerRRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(x, y, w, h),
-      Radius.circular(w * 0.1),
-    );
-    canvas.drawRRect(trailerRRect, paint);
-    canvas.drawRRect(trailerRRect, borderPaint);
-
-    // Corrugated container ridges (linhas horizontais de detalhe em vista superior)
-    final double step = h / 5;
-    for (double i = y + step; i < y + h - 1; i += step) {
-      canvas.drawLine(Offset(x + 2, i), Offset(x + w - 2, i), detailPaint);
-    }
-  }
-
-  void _drawLightTruck(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    _drawCab(canvas, w * 0.18, 0, w * 0.64, h * 0.38, paint, borderPaint);
-    _drawTrailer(canvas, w * 0.18, h * 0.42, w * 0.64, h * 0.55, paint, borderPaint, detailPaint);
-  }
-
-  void _drawRigidTruck(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    _drawCab(canvas, w * 0.16, 0, w * 0.68, h * 0.34, paint, borderPaint);
-    _drawTrailer(canvas, w * 0.16, h * 0.38, w * 0.68, h * 0.58, paint, borderPaint, detailPaint);
-  }
-
-  void _drawCarreta(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cavalo mecânico
-    _drawCab(canvas, w * 0.2, 0, w * 0.6, h * 0.28, paint, borderPaint);
-
-    // Pino de engate (chassis)
-    final chassisPaint = Paint()
-      ..color = borderPaint.color.withValues(alpha: 0.5)
+    // ── Linha central de detalhe (percepção de direção) ───────────
+    final detailPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.50)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-    canvas.drawLine(Offset(w / 2, h * 0.28), Offset(w / 2, h * 0.38), chassisPaint);
+      ..strokeWidth = 1.0
+      ..strokeCap = StrokeCap.round;
 
-    // Semirreboque
-    _drawTrailer(canvas, w * 0.16, h * 0.38, w * 0.68, h * 0.58, paint, borderPaint, detailPaint);
+    canvas.drawLine(
+      Offset(w / 2, h * 0.12),
+      Offset(w / 2, h * 0.62),
+      detailPaint,
+    );
   }
 
-  void _drawBitrem(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cavalo mecânico
-    _drawCab(canvas, w * 0.22, 0, w * 0.56, h * 0.22, paint, borderPaint);
+  /// Constrói o path da seta: ponta no topo, base arredondada na baixo.
+  Path _buildArrowPath(double w, double h) {
+    final path = Path();
 
-    // Pino 1 (chassis)
-    final chassisPaint = Paint()
-      ..color = borderPaint.color.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.8;
-    canvas.drawLine(Offset(w / 2, h * 0.22), Offset(w / 2, h * 0.28), chassisPaint);
+    // Ponta (topo — direção de movimento)
+    path.moveTo(w / 2, 0);
 
-    // Reboque 1
-    _drawTrailer(canvas, w * 0.18, h * 0.28, w * 0.64, h * 0.31, paint, borderPaint, detailPaint);
+    // Ombro direito — curva suave para o corpo
+    path.cubicTo(
+      w * 0.90, h * 0.28,
+      w * 1.00, h * 0.45,
+      w * 0.82, h * 0.58,
+    );
 
-    // Pino 2
-    canvas.drawLine(Offset(w / 2, h * 0.59), Offset(w / 2, h * 0.64), chassisPaint);
+    // Entalhe no centro da base (cria efeito de "V" invertido)
+    path.lineTo(w * 0.62, h * 0.50);
 
-    // Reboque 2
-    _drawTrailer(canvas, w * 0.18, h * 0.64, w * 0.64, h * 0.32, paint, borderPaint, detailPaint);
-  }
+    // Arco da base (direita → esquerda)
+    path.arcToPoint(
+      Offset(w * 0.38, h * 0.50),
+      radius: Radius.circular(h * 0.15),
+      clockwise: false,
+    );
 
-  void _drawRodotrem(Canvas canvas, double w, double h, Paint paint, Paint borderPaint, Paint detailPaint) {
-    // Cavalo mecânico
-    _drawCab(canvas, w * 0.24, 0, w * 0.52, h * 0.18, paint, borderPaint);
+    // Ombro esquerdo
+    path.lineTo(w * 0.18, h * 0.58);
 
-    // Pino 1 (chassis)
-    final chassisPaint = Paint()
-      ..color = borderPaint.color.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(w / 2, h * 0.18), Offset(w / 2, h * 0.23), chassisPaint);
+    path.cubicTo(
+      w * 0.00, h * 0.45,
+      w * 0.10, h * 0.28,
+      w / 2, 0,
+    );
 
-    // Reboque 1
-    _drawTrailer(canvas, w * 0.20, h * 0.23, w * 0.60, h * 0.22, paint, borderPaint, detailPaint);
-
-    // Pino 2
-    canvas.drawLine(Offset(w / 2, h * 0.45), Offset(w / 2, h * 0.49), chassisPaint);
-
-    // Reboque 2
-    _drawTrailer(canvas, w * 0.20, h * 0.49, w * 0.60, h * 0.22, paint, borderPaint, detailPaint);
-
-    // Pino 3
-    canvas.drawLine(Offset(w / 2, h * 0.71), Offset(w / 2, h * 0.75), chassisPaint);
-
-    // Reboque 3
-    _drawTrailer(canvas, w * 0.20, h * 0.75, w * 0.60, h * 0.21, paint, borderPaint, detailPaint);
+    path.close();
+    return path;
   }
 
   @override
-  bool shouldRepaint(covariant _VehiclePainter oldDelegate) {
-    return oldDelegate.color != color || oldDelegate.profileType != profileType;
-  }
+  bool shouldRepaint(covariant _ArrowPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
-

@@ -1,16 +1,25 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/app_colors.dart';
 
 /// Persiste e exibe os últimos 5 destinos buscados com sucesso.
+///
+/// [horizontal] : quando true, exibe chips compactos em scroll horizontal
+///               (para a barra de atalhos rápidos abaixo da busca).
+///               Quando false (padrão), exibe lista vertical no Drawer.
 class RecentDestinations extends StatefulWidget {
   const RecentDestinations({
     super.key,
     required this.onTap,
+    this.horizontal = false,
   });
 
   /// Chamado com o endereço selecionado pelo usuário
   final void Function(String address) onTap;
+
+  /// Modo de exibição: horizontal (chips) ou vertical (lista)
+  final bool horizontal;
 
   @override
   State<RecentDestinations> createState() => _RecentDestinationsState();
@@ -87,9 +96,22 @@ class _RecentDestinationsState extends State<RecentDestinations> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const SizedBox.shrink();
-    if (_entries.isEmpty) return const SizedBox.shrink();
+    if (_loading || _entries.isEmpty) return const SizedBox.shrink();
 
+    // ── Modo horizontal: chips em scroll ────────────────────────────
+    if (widget.horizontal) {
+      return ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _entries.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        itemBuilder: (_, i) => _RecentChip(
+          entry: _entries[i],
+          onTap: () => widget.onTap(_entries[i].address),
+        ),
+      );
+    }
+
+    // ── Modo vertical: lista no Drawer ──────────────────────────────
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: _entries.map((entry) => _RecentTile(
@@ -107,6 +129,74 @@ class _RecentEntry {
   _RecentEntry({required this.address, required this.timestamp});
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Chip compacto (modo horizontal)
+// ─────────────────────────────────────────────────────────────
+class _RecentChip extends StatelessWidget {
+  const _RecentChip({required this.entry, required this.onTap});
+
+  final _RecentEntry entry;
+  final VoidCallback onTap;
+
+  // Extrai apenas a primeira parte significativa do endereço (rua + número)
+  String get _shortLabel {
+    final parts = entry.address.split(',');
+    return parts.first.trim();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        constraints: const BoxConstraints(maxWidth: 180),
+        decoration: BoxDecoration(
+          color: AppColors.bgPanel.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.10),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.history_rounded,
+              color: AppColors.amber,
+              size: 14,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _shortLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Tile vertical (modo drawer)
+// ─────────────────────────────────────────────────────────────
 class _RecentTile extends StatelessWidget {
   const _RecentTile({
     required this.entry,
@@ -136,12 +226,12 @@ class _RecentTile extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: const Color(0xFFE07B1A).withValues(alpha: 0.12),
+                color: AppColors.amberSubtle,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
                 Icons.history_rounded,
-                color: Color(0xFFE07B1A),
+                color: AppColors.amber,
                 size: 18,
               ),
             ),

@@ -21,7 +21,10 @@ import '../widgets/road_analysis_layer.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
 import '../widgets/navigation_panel.dart';
+import '../widgets/maneuver_hud.dart';
+import '../widgets/map_ui_extras.dart';
 import '../models/delivery_stop.dart';
+import '../services/preferences_service.dart';
 
 
 
@@ -100,6 +103,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   // --- OCR ---
   bool _isOcrLoading = false;
+
+  // --- Precisão GPS (para indicador de sinal) ---
+  double _gpsAccuracy = 999.0; // metros; inicia alto ("sem sinal")
+
+  // --- Banner de navegação iniciada ---
+  bool _showNavBanner = false;
+  Timer? _navBannerTimer;
 
   // --- RepaintBoundary key (compartilhar rota) ---
   final GlobalKey _mapRepaintKey = GlobalKey();
@@ -184,6 +194,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _positionStream?.cancel();
     _compassStream?.cancel();
     _compassCheckTimer?.cancel();
+    _navBannerTimer?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _debounce?.cancel();
@@ -290,6 +301,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _currentPosition = newPos;
         _lastKnownSpeed = speed;
+        _gpsAccuracy = position.accuracy;
       });
 
       final gpsHeading = _safeGpsHeading(position);
@@ -780,54 +792,170 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   void _showTruckProfileSheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF111318),
+      backgroundColor: const Color(0xFF111318).withValues(alpha: 0.98),
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) {
-        final tc = context.read<TruckController>();
+        final tc = context.watch<TruckController>();
+        final safeBottom = MediaQuery.of(context).padding.bottom;
+
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          padding: EdgeInsets.fromLTRB(20, 20, 20, safeBottom + 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Selecionar perfil de caminhão',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
+              // Barra superior/indicador de arrastar
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-              const SizedBox(height: 16),
-              ...TruckProfilePresets.all.map((profile) {
-                final selected = profile.type == tc.truckProfile.type;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.local_shipping_rounded,
-                    color: selected ? const Color(0xFF34C759) : Colors.white70,
+              Row(
+                children: [
+                  const Icon(
+                    Icons.local_shipping_rounded,
+                    color: AppColors.amber,
+                    size: 22,
                   ),
-                  title: Text(
-                    profile.label,
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Perfil do Caminhão',
                     style: TextStyle(
-                      color: selected ? Colors.white : Colors.white70,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.2,
                     ),
                   ),
-                  subtitle: Text(
-                    '${profile.maxWeightKg.toInt()} kg • ${profile.maxHeightMeters} m • ${profile.axles} eixos',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  onTap: () {
-                    tc.setTruckProfile(profile);
-                    Navigator.of(context).pop();
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Defina as características do seu veículo para evitar pontes baixas, estradas estreitas e restrições de peso.',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.45),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: TruckProfilePresets.all.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final profile = TruckProfilePresets.all[index];
+                    final selected = profile.type == tc.truckProfile.type;
+
+                    return GestureDetector(
+                      onTap: () {
+                        HapticFeedback.mediumImpact();
+                        tc.setTruckProfile(profile);
+                        Navigator.of(context).pop();
+                        showStyledSnackBar(
+                          context: context,
+                          message: 'Perfil alterado para: ${profile.label}',
+                          icon: Icons.check_circle_rounded,
+                          iconColor: const Color(0xFF4CAF50),
+                        );
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppColors.amber.withValues(alpha: 0.08)
+                              : Colors.white.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: selected
+                                ? AppColors.amber.withValues(alpha: 0.40)
+                                : Colors.white.withValues(alpha: 0.08),
+                            width: selected ? 1.8 : 1.0,
+                          ),
+                          boxShadow: selected
+                              ? [
+                                  BoxShadow(
+                                    color: AppColors.amber.withValues(alpha: 0.04),
+                                    blurRadius: 10,
+                                    spreadRadius: 1,
+                                  )
+                                ]
+                              : null,
+                        ),
+                        child: Row(
+                          children: [
+                            // Ícone visual e indicador de seleção
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? AppColors.amber.withValues(alpha: 0.15)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                selected ? Icons.radio_button_checked_rounded : Icons.local_shipping_rounded,
+                                color: selected ? AppColors.amber : Colors.white38,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            // Nome e detalhes informativos
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    profile.label,
+                                    style: TextStyle(
+                                      color: selected ? Colors.white : Colors.white.withValues(alpha: 0.75),
+                                      fontSize: 14,
+                                      fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  // Linha de badges/tags informativas
+                                  Row(
+                                    children: [
+                                      _ProfileTag(
+                                        label: '${(profile.maxWeightKg / 1000).toStringAsFixed(0)} t',
+                                        icon: Icons.scale_rounded,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      _ProfileTag(
+                                        label: '${profile.maxHeightMeters.toStringAsFixed(1)}m Alt',
+                                        icon: Icons.height_rounded,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      _ProfileTag(
+                                        label: '${profile.axles} Eixos',
+                                        icon: Icons.toll_rounded,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
                   },
-                );
-              }),
+                ),
+              ),
             ],
           ),
         );
@@ -1398,6 +1526,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   });
                                 },
                               ),
+                            // ── Indicador de sinal GPS ─────────────────
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: GpsSignalDot(accuracy: _gpsAccuracy),
+                            ),
                           ],
                         ),
                       ),
@@ -1606,12 +1739,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               },
               onStopsTap: () async {
                 final truckCtrl = context.read<TruckController>();
-                final result = await Navigator.pushNamed<List<DeliveryStop>>(
+                final resultObj = await Navigator.pushNamed(
                   context,
                   '/route_manager',
                 );
 
-                if (result != null && mounted) {
+                if (resultObj is List<DeliveryStop> && mounted) {
+                  final result = resultObj;
                   LatLng startLoc = const LatLng(-22.9068, -43.1729);
                   try {
                     if (await LocationService.handlePermission()) {
@@ -1643,6 +1777,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     _offRouteCount = 0;
                     _isRecalculating = false;
                     _showReroutingBanner = false;
+                    _showNavBanner = true;
+                  });
+                  _navBannerTimer?.cancel();
+                  _navBannerTimer = Timer(const Duration(milliseconds: 2500), () {
+                    if (mounted) setState(() => _showNavBanner = false);
                   });
                   if (_currentPosition != null) {
                     _moveNavigationCamera(
@@ -1661,6 +1800,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               },
             ),
 
+          // ── HUD DE MANOBRA FIXO (topo, visível durante navegação) ──────────
+          if (tc.isNavigating && !_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 0,
+              right: 0,
+              child: const ManeuverHud(),
+            ),
+
+          // ── BANNER "NAVEGAÇÃO INICIADA" ────────────────────────────────────
+          if (_showNavBanner)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 100,
+              left: 32,
+              right: 32,
+              child: const NavStartBanner(),
+            ),
+
           // ── HUD DE NAVEGAÇÃO FULLSCREEN ──────────────────────────────────
           if (_isFullScreen)
             Positioned(
@@ -1673,9 +1830,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
 
           // ── HUD DE ALERTAS PROATIVOS ──────────────────────────────────────
+          // Posicionado abaixo do ManeuverHud quando navegando
           if (tc.isNavigating && tc.routePoints.isNotEmpty)
             Positioned(
-              top: MediaQuery.of(context).padding.top + 76,
+              top: MediaQuery.of(context).padding.top + (tc.isNavigating ? 108 : 76),
               left: 0,
               right: 0,
               child: ProactiveAlertHud(
@@ -1686,7 +1844,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
 
           // ── BOTÕES LATERAIS ───────────────────────────────────────────────
-          // Posicionados dinamicamente ACIMA do NavigationPanel usando ValueListenableBuilder
+          // Layout simplificado:
+          //   Esquerdo: velocímetro (só ao navegar)
+          //   Direito : follow mode (sempre) + marcar alerta (só com posição) + controle de áudio
           ValueListenableBuilder<double>(
             valueListenable: _panelSizeNotifier,
             builder: (context, panelSize, child) {
@@ -1701,63 +1861,64 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 buttonBottom = panelPixels + 16;
               }
 
+              final prefs = context.watch<PreferencesService>();
+
               return Stack(
                 children: [
-                  // Botões de zoom: canto ESQUERDO
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    left: 16,
-                    bottom: buttonBottom,
-                    child: Column(
-                      children: [
-                        // Velocímetro — aparece apenas durante navegação
-                        if (tc.isNavigating) ...[
-                          _SpeedHud(speedMs: _lastKnownSpeed),
-                          const SizedBox(height: 10),
-                        ],
-                        _LargeMapButton(
-                          icon: Icons.add_rounded,
-                          onPressed: () => _mapController.move(
-                            _mapController.camera.center,
-                            _mapController.camera.zoom + 1,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        _LargeMapButton(
-                          icon: Icons.remove_rounded,
-                          onPressed: () => _mapController.move(
-                            _mapController.camera.center,
-                            _mapController.camera.zoom - 1,
-                          ),
-                        ),
-                      ],
+                  // ── Esquerdo: velocímetro sempre visível com sinal ────────
+                  if (_currentPosition != null && !_isFullScreen)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      left: 16,
+                      bottom: buttonBottom,
+                      child: _SpeedHud(speedMs: _lastKnownSpeed),
                     ),
-                  ),
-                  // Botões de controle: canto DIREITO
+
+                  // ── Direito: follow mode + add marker + volume ───────────
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 200),
                     curve: Curves.easeOut,
                     right: 16,
                     bottom: buttonBottom,
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
+                        // Botão de Mute/Unmute rápido para a Voz Guia
                         _LargeMapButton(
-                          icon: Icons.add_location_alt_rounded,
-                          isPrimary: true,
+                          icon: prefs.ttsEnabled
+                              ? Icons.volume_up_rounded
+                              : Icons.volume_off_rounded,
+                          isPrimary: !prefs.ttsEnabled, // fica em destaque vermelho/tema se mutado
                           onPressed: () {
-                            _showAddMarkerDialog(_currentPosition ?? _mapController.camera.center);
+                            prefs.setTtsEnabled(!prefs.ttsEnabled);
+                            showStyledSnackBar(
+                              context: context,
+                              message: prefs.ttsEnabled
+                                  ? 'Voz guia ativada'
+                                  : 'Voz guia silenciada',
+                              icon: prefs.ttsEnabled
+                                  ? Icons.volume_up_rounded
+                                  : Icons.volume_off_rounded,
+                              iconColor: prefs.ttsEnabled
+                                  ? const Color(0xFF4CAF50)
+                                  : const Color(0xFFEF5350),
+                            );
                           },
                         ),
                         const SizedBox(height: 10),
-                        _LargeMapButton(
-                          icon: _isFullScreen
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded,
-                          onPressed: () =>
-                              setState(() => _isFullScreen = !_isFullScreen),
-                        ),
-                        const SizedBox(height: 10),
+
+                        // Adicionar alerta — visível quando há posição
+                        if (_currentPosition != null) ...[
+                          _LargeMapButton(
+                            icon: Icons.add_location_alt_rounded,
+                            onPressed: () {
+                              _showAddMarkerDialog(_currentPosition!);
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        // Follow mode — botão principal, sempre visível
                         _LargeMapButton(
                           icon: _isFollowMode
                               ? Icons.navigation_rounded
@@ -2000,6 +2161,7 @@ class _SpeedHud extends StatelessWidget {
               fontSize: 26,
               fontWeight: FontWeight.w900,
               height: 1,
+              fontFeatures: const [ui.FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 2),
@@ -2168,6 +2330,48 @@ class _FullscreenHudState extends State<_FullscreenHud> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Badge/Etiqueta do Perfil de Caminhão
+// ─────────────────────────────────────────────────────────────────────────────
+class _ProfileTag extends StatelessWidget {
+  const _ProfileTag({required this.label, required this.icon});
+  final String label;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            color: Colors.white.withValues(alpha: 0.35),
+            size: 11,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.55),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
