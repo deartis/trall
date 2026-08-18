@@ -29,7 +29,7 @@ class ManeuverHud extends StatelessWidget {
     final instruction = step != null
         ? _maneuverLabel(step.type, step.modifier)
         : 'Continue em frente';
-    final distance = step?.formattedDistance ?? '';
+    final distance = tc.formattedDistanceToNextStep;
     final street = step?.streetName ?? '';
 
     // Cor de destaque baseada no tipo de manobra

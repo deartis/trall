@@ -8,6 +8,7 @@ import '../widgets/app_drawer.dart';
 import '../widgets/bottom_nav_bar.dart';
 import '../widgets/recent_destinations.dart';
 import '../models/delivery_stop.dart';
+import '../core/app_snackbar.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -75,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // ── Mapa (tela cheia, sempre presente) ─────────────────
             const MapScreen(),
 
-            // ── Atalhos rápidos (recentes) ──────────────────────────
+            // ── Atalhos rápidos (Locais Próximos + Recentes) ─────────
             // Aparecem abaixo da barra de busca quando sem rota ativa
             if (!isNavigating && !tc.isRouting && tc.suggestions.isEmpty)
               _QuickAccessBar(
@@ -92,11 +93,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   await truckCtrl.searchAddress(address, startLoc);
                 },
               ),
-
-            // ── Botão Hamburguer (☰) — mantido para drawer ─────────
-            _HamburgerButton(
-              onTap: () => Scaffold.of(ctx).openDrawer(),
-            ),
           ],
         ),
       ),
@@ -110,8 +106,8 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Barra de atalhos rápidos (destinos recentes)
-//  Posicionada abaixo da barra de busca do MapScreen
+//  Barra de atalhos rápidos (Locais Próximos + Destinos Recentes)
+//  Posicionada abaixo da barra de busca integrada do MapScreen
 // ─────────────────────────────────────────────────────────────
 class _QuickAccessBar extends StatelessWidget {
   const _QuickAccessBar({required this.onAddressTap});
@@ -120,104 +116,148 @@ class _QuickAccessBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Fica abaixo da search bar: top + 12 (safe area) + ~54px (search field height) + 8px gap
     final topOffset = MediaQuery.of(context).padding.top + 74.0;
+    final tc = context.watch<TruckController>();
 
     return Positioned(
       top: topOffset,
       left: 16,
       right: 16,
-      child: _RecentDestinationsCard(onAddressTap: onAddressTap),
-    );
-  }
-}
-
-class _RecentDestinationsCard extends StatelessWidget {
-  const _RecentDestinationsCard({required this.onAddressTap});
-  final Future<void> Function(String) onAddressTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Label seção ─────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: Text(
-            'RECENTES',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.28),
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
+      child: SizedBox(
+        height: 38,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          children: [
+            // ── Chip: Locais Próximos ─────────────────────────────────
+            _ActionChip(
+              icon: tc.isLoadingPOIs
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.place_rounded,
+                      color: Colors.white,
+                      size: 15,
+                    ),
+              label: tc.isLoadingPOIs ? 'Buscando...' : 'Locais Próximos',
+              isPrimary: true,
+              onTap: tc.isLoadingPOIs
+                  ? null
+                  : () async {
+                      try {
+                        if (await LocationService.handlePermission()) {
+                          final pos = await LocationService.getCurrentPosition();
+                          tc.findNearbyPOIs(LatLng(pos.latitude, pos.longitude));
+                        } else {
+                          if (!context.mounted) return;
+                          showStyledSnackBar(
+                            context: context,
+                            message: 'Permissão de GPS necessária.',
+                            icon: Icons.gps_off_rounded,
+                          );
+                        }
+                      } catch (_) {
+                        if (!context.mounted) return;
+                        showStyledSnackBar(
+                          context: context,
+                          message: 'Aguardando sinal de GPS...',
+                          icon: Icons.gps_off_rounded,
+                        );
+                      }
+                    },
             ),
-          ),
-        ),
-        // ── Lista horizontal de chips de destinos recentes ──────────
-        SizedBox(
-          height: 40,
-          child: RecentDestinations(
-            onTap: onAddressTap,
-            horizontal: true,
-          ),
-        ),
-      ],
-    );
-  }
-}
+            const SizedBox(width: 8),
 
-// ─────────────────────────────────────────────────────────────
-//  Botão Hamburguer flutuante
-// ─────────────────────────────────────────────────────────────
-class _HamburgerButton extends StatelessWidget {
-  const _HamburgerButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tc = context.watch<TruckController>();
-    final isNavigating = tc.isNavigating;
-    final topPos = MediaQuery.of(context).padding.top + 74.0;
-
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-      top: isNavigating ? -80 : topPos,
-      left: 16,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 200),
-        opacity: isNavigating ? 0.0 : 1.0,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: Ink(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1D26).withValues(alpha: 0.92),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  width: 1.5,
+            // ── Chip: Limpar POIs (exibido apenas quando houver POIs) ─
+            if (tc.automaticPOIs.isNotEmpty) ...[
+              _ActionChip(
+                icon: const Icon(
+                  Icons.clear_all_rounded,
+                  color: Colors.white70,
+                  size: 15,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                label: 'Limpar POIs',
+                isPrimary: false,
+                onTap: tc.clearAutomaticPOIs,
               ),
-              child: Icon(
-                Icons.menu_rounded,
-                color: Colors.white.withValues(alpha: 0.85),
-                size: 22,
-              ),
+              const SizedBox(width: 8),
+            ],
+
+            // ── Chips de Destinos Recentes ────────────────────────────
+            RecentDestinations(
+              onTap: onAddressTap,
+              horizontal: true,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isPrimary = false,
+  });
+
+  final Widget icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool isPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 13),
+          decoration: BoxDecoration(
+            color: isPrimary
+                ? const Color(0xFFE07B1A)
+                : const Color(0xFF111318).withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isPrimary
+                  ? const Color(0xFFFF9D3B)
+                  : Colors.white.withValues(alpha: 0.12),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isPrimary
+                    ? const Color(0xFFE07B1A).withValues(alpha: 0.35)
+                    : Colors.black.withValues(alpha: 0.35),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              icon,
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: isPrimary ? FontWeight.w700 : FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),

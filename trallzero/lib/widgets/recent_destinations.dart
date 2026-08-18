@@ -98,16 +98,19 @@ class _RecentDestinationsState extends State<RecentDestinations> {
   Widget build(BuildContext context) {
     if (_loading || _entries.isEmpty) return const SizedBox.shrink();
 
-    // ── Modo horizontal: chips em scroll ────────────────────────────
+    // ── Modo horizontal: chips em linha ─────────────────────────────
     if (widget.horizontal) {
-      return ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: _entries.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
-        itemBuilder: (_, i) => _RecentChip(
-          entry: _entries[i],
-          onTap: () => widget.onTap(_entries[i].address),
-        ),
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < _entries.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _RecentChip(
+              entry: _entries[i],
+              onTap: () => widget.onTap(_entries[i].address),
+            ),
+          ],
+        ],
       );
     }
 

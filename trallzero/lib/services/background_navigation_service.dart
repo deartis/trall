@@ -5,8 +5,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 
 @pragma('vm:entry-point')
-void onNotificationTapBackground(NotificationResponse notificationResponse) {
-  if (notificationResponse.actionId == 'stop_navigation') {
+void onNotificationTapBackground(NotificationResponse notificationResponse) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (notificationResponse.actionId == 'stop_navigation' || notificationResponse.id == 888) {
     FlutterBackgroundService().invoke('stopService');
   }
 }
@@ -47,6 +48,11 @@ class BackgroundNavigationService {
 
     await flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        if (response.actionId == 'stop_navigation' || response.id == 888) {
+          service.invoke('stopService');
+        }
+      },
       onDidReceiveBackgroundNotificationResponse: onNotificationTapBackground,
     );
 
@@ -71,7 +77,7 @@ class BackgroundNavigationService {
                 'stop_navigation',
                 'PARAR NAVEGAÇÃO',
                 cancelNotification: true,
-                showsUserInterface: false,
+                showsUserInterface: true,
               ),
             ],
           ),
@@ -88,9 +94,6 @@ class BackgroundNavigationService {
         service.setAsBackgroundService();
       });
     }
-
-    // NÃO exibe notificação imediatamente — só aparece quando o GPS
-    // receber a primeira posição (ou seja, navegação realmente ativa).
 
     // Fluxo de atualizações do GPS em segundo plano
     StreamSubscription<Position>? positionSubscription;
@@ -124,7 +127,13 @@ class BackgroundNavigationService {
     // cancela o GPS stream, remove a notificação e mata o serviço.
     service.on('stopService').listen((event) async {
       await positionSubscription?.cancel();
-      await flutterLocalNotificationsPlugin.cancelAll();
+      try {
+        await flutterLocalNotificationsPlugin.cancel(888);
+        await flutterLocalNotificationsPlugin.cancelAll();
+      } catch (_) {}
+      if (service is AndroidServiceInstance) {
+        service.setAsBackgroundService();
+      }
       service.stopSelf();
     });
   }

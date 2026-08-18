@@ -17,7 +17,6 @@ import '../services/ocr_service.dart';
 import '../widgets/navigation_marker.dart';
 import '../widgets/proactive_alert_hud.dart';
 import '../controllers/truck_controller.dart';
-import '../widgets/road_analysis_layer.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
 import '../widgets/navigation_panel.dart';
@@ -25,8 +24,6 @@ import '../widgets/maneuver_hud.dart';
 import '../widgets/map_ui_extras.dart';
 import '../models/delivery_stop.dart';
 import '../services/preferences_service.dart';
-
-
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -95,7 +92,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   // --- Follow mode e FullScreen ---
   bool _isFollowMode = true;
-  bool _isFullScreen = false;
+  final bool _isFullScreen = false;
 
   // --- Zoom atual (para ocultar marcadores no zoom out) ---
   double _currentZoom = 13.0;
@@ -182,7 +179,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _mapController.rotate(0);
       _startCompassUpdates();
-
     });
 
     _initLocation();
@@ -252,19 +248,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final rawPos = LatLng(position.latitude, position.longitude);
       var newPos = rawPos;
       final truckController = context.read<TruckController>();
+      final speed = _safeSpeed(position);
 
       if (truckController.isNavigating &&
           truckController.routePoints.isNotEmpty) {
         // Projeção no SEGMENTO mais próximo (em vez de vértice mais próximo).
         // Isso garante movimento suave em curvas, eliminando o efeito de parar/pular.
-        final snapResult = _snapToRouteSegment(rawPos, truckController.routePoints);
+        final snapResult = _snapToRouteSegment(
+          rawPos,
+          truckController.routePoints,
+        );
         final minDist = snapResult.$2;
         const double snappingThreshold = 35.0;
 
         if (minDist < snappingThreshold) {
           newPos = snapResult.$1;
           _offRouteCount = 0;
-          truckController.updateCurrentStep(newPos); // avança manobra
+          truckController.updateCurrentStep(newPos, speed: speed); // avança manobra e gerencia alertas de voz
         } else {
           if (position.accuracy <= 20.0) {
             _offRouteCount++;
@@ -272,12 +272,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               _triggerReroute(rawPos, truckController);
             }
           } else {
-            debugPrint('[Rerouting] Desvio ignorado devido a baixa precisão do GPS: ${position.accuracy}m');
+            debugPrint(
+              '[Rerouting] Desvio ignorado devido a baixa precisão do GPS: ${position.accuracy}m',
+            );
           }
         }
       }
-
-      final speed = _safeSpeed(position);
 
       // --- Cálculo da Duração Dinâmica Adaptativa ---
       // Limitada a 600ms para que updates de 1m pareçam fluídos.
@@ -286,7 +286,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         final elapsed = now.difference(_lastGpsUpdateTime!);
         if (elapsed.inMilliseconds >= 200 && elapsed.inMilliseconds <= 2000) {
           _animationDuration = Duration(
-            milliseconds: (elapsed.inMilliseconds * 0.85).clamp(200, 600).round(),
+            milliseconds: (elapsed.inMilliseconds * 0.85)
+                .clamp(200, 600)
+                .round(),
           );
         } else {
           _animationDuration = const Duration(milliseconds: 600);
@@ -709,7 +711,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 36, height: 3,
+                width: 36,
+                height: 3,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: Colors.white24,
@@ -728,28 +731,60 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               const SizedBox(height: 16),
               ListTile(
                 leading: Container(
-                  width: 44, height: 44,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: const Color(0xFF2563EB).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.camera_alt_rounded, color: Color(0xFF2563EB)),
+                  child: const Icon(
+                    Icons.camera_alt_rounded,
+                    color: Color(0xFF2563EB),
+                  ),
                 ),
-                title: const Text('Câmera', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text('Fotografe a nota ou etiqueta', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
+                title: const Text(
+                  'Câmera',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  'Fotografe a nota ou etiqueta',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    fontSize: 12,
+                  ),
+                ),
                 onTap: () => Navigator.pop(context, ImageSource.camera),
               ),
               ListTile(
                 leading: Container(
-                  width: 44, height: 44,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: const Color(0xFF34C759).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.photo_library_rounded, color: Color(0xFF34C759)),
+                  child: const Icon(
+                    Icons.photo_library_rounded,
+                    color: Color(0xFF34C759),
+                  ),
                 ),
-                title: const Text('Galeria', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: Text('Selecione uma imagem salva', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
+                title: const Text(
+                  'Galeria',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  'Selecione uma imagem salva',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    fontSize: 12,
+                  ),
+                ),
                 onTap: () => Navigator.pop(context, ImageSource.gallery),
               ),
             ],
@@ -762,15 +797,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     setState(() => _isOcrLoading = true);
     try {
-      final picked = await ImagePicker().pickImage(source: source, imageQuality: 90);
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 90,
+      );
       if (picked == null) return;
 
-      final rawText = await OcrService.instance.extractTextFromImage(picked.path);
+      final rawText = await OcrService.instance.extractTextFromImage(
+        picked.path,
+      );
       final address = OcrService.instance.parseAddressFromText(rawText);
 
       if (address.isNotEmpty && mounted) {
         _searchController.text = address;
-        context.read<TruckController>().fetchSuggestions(address, userLocation: _currentPosition);
+        context.read<TruckController>().fetchSuggestions(
+          address,
+          userLocation: _currentPosition,
+        );
       } else if (mounted) {
         showStyledSnackBar(
           context: context,
@@ -853,7 +896,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: TruckProfilePresets.all.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 10),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final profile = TruckProfilePresets.all[index];
                     final selected = profile.type == tc.truckProfile.type;
@@ -887,10 +931,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           boxShadow: selected
                               ? [
                                   BoxShadow(
-                                    color: AppColors.amber.withValues(alpha: 0.04),
+                                    color: AppColors.amber.withValues(
+                                      alpha: 0.04,
+                                    ),
                                     blurRadius: 10,
                                     spreadRadius: 1,
-                                  )
+                                  ),
                                 ]
                               : null,
                         ),
@@ -907,8 +953,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Icon(
-                                selected ? Icons.radio_button_checked_rounded : Icons.local_shipping_rounded,
-                                color: selected ? AppColors.amber : Colors.white38,
+                                selected
+                                    ? Icons.radio_button_checked_rounded
+                                    : Icons.local_shipping_rounded,
+                                color: selected
+                                    ? AppColors.amber
+                                    : Colors.white38,
                                 size: 20,
                               ),
                             ),
@@ -921,9 +971,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   Text(
                                     profile.label,
                                     style: TextStyle(
-                                      color: selected ? Colors.white : Colors.white.withValues(alpha: 0.75),
+                                      color: selected
+                                          ? Colors.white
+                                          : Colors.white.withValues(
+                                              alpha: 0.75,
+                                            ),
                                       fontSize: 14,
-                                      fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                                      fontWeight: selected
+                                          ? FontWeight.w800
+                                          : FontWeight.w700,
                                     ),
                                   ),
                                   const SizedBox(height: 6),
@@ -931,12 +987,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   Row(
                                     children: [
                                       _ProfileTag(
-                                        label: '${(profile.maxWeightKg / 1000).toStringAsFixed(0)} t',
+                                        label:
+                                            '${(profile.maxWeightKg / 1000).toStringAsFixed(0)} t',
                                         icon: Icons.scale_rounded,
                                       ),
                                       const SizedBox(width: 6),
                                       _ProfileTag(
-                                        label: '${profile.maxHeightMeters.toStringAsFixed(1)}m Alt',
+                                        label:
+                                            '${profile.maxHeightMeters.toStringAsFixed(1)}m Alt',
                                         icon: Icons.height_rounded,
                                       ),
                                       const SizedBox(width: 6),
@@ -973,7 +1031,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       ),
       builder: (context) => Padding(
         padding: EdgeInsets.fromLTRB(
-            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
+          16,
+          12,
+          16,
+          MediaQuery.of(context).padding.bottom + 24,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1229,7 +1291,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   flags: InteractiveFlag.all,
                 ),
                 onMapEvent: (event) {
-                  if (_isFollowMode && event.source == MapEventSource.dragStart) {
+                  if (_isFollowMode &&
+                      event.source == MapEventSource.dragStart) {
                     setState(() => _isFollowMode = false);
                     _cameraAnimationController?.stop();
                   }
@@ -1242,124 +1305,124 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
               ),
               children: [
-              ColorFiltered(
-                colorFilter: const ColorFilter.matrix(<double>[
-                  1.4, 0, 0, 0, 30, // Red: multiply by 1.4, add 30
-                  0, 1.4, 0, 0, 30, // Green
-                  0, 0, 1.4, 0, 30, // Blue
-                  0, 0, 0, 1, 0,    // Alpha
-                ]),
-                child: TileLayer(
-                  urlTemplate:
-                      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                  subdomains: const ['a', 'b', 'c', 'd'],
-                  userAgentPackageName: 'com.trallzero.app',
+                ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    1.4, 0, 0, 0, 30, // Red: multiply by 1.4, add 30
+                    0, 1.4, 0, 0, 30, // Green
+                    0, 0, 1.4, 0, 30, // Blue
+                    0, 0, 0, 1, 0, // Alpha
+                  ]),
+                  child: TileLayer(
+                    urlTemplate:
+                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    subdomains: const ['a', 'b', 'c', 'd'],
+                    userAgentPackageName: 'com.trallzero.app',
+                  ),
                 ),
-              ),
-              if (tc.routePoints.isNotEmpty)
-                PolylineLayer(
-                  polylines: [
-                    ...tc.availableRoutes
-                        .asMap()
-                        .entries
-                        .where((entry) => entry.key != tc.selectedRouteIndex)
-                        .map((entry) {
-                          final route = entry.value;
-                          return Polyline(
-                            points: route.points,
-                            color: Colors.white.withValues(alpha: 0.18),
-                            strokeWidth: 5.0,
-                          );
-                        }),
-                    // Glow effect — halo under the main route
-                    Polyline(
-                      points: tc.routePoints,
-                      color: const Color(0xFF2563EB).withValues(alpha: 0.18),
-                      strokeWidth: 16.0,
-                    ),
-                    ...(tc.routeAnalysisSegments.isNotEmpty
-                        ? buildRoadAnalysisPolylines(tc.routeAnalysisSegments)
-                        : [
-                            Polyline(
-                              points: tc.routePoints,
-                              color: const Color(0xFF3B82F6),
-                              strokeWidth: 5.5,
-                            ),
-                          ]),
-                  ],
-                ),
-              MarkerLayer(
-                markers: [
-                  if (_animatedCurrentPosition != null)
-                    Marker(
-                      point: _animatedCurrentPosition!,
-                      width: 54,
-                      height: 54,
-                      rotate: true,
-                      child: NavigationMarker(
-                        speed: _lastKnownSpeed,
-                        profileType: tc.truckProfile.type,
-                        heading: _heading,
+                if (tc.routePoints.isNotEmpty)
+                  PolylineLayer(
+                    polylines: [
+                      ...tc.availableRoutes
+                          .asMap()
+                          .entries
+                          .where((entry) => entry.key != tc.selectedRouteIndex)
+                          .map((entry) {
+                            final route = entry.value;
+                            return Polyline(
+                              points: route.points,
+                              color: Colors.white.withValues(alpha: 0.18),
+                              strokeWidth: 5.0,
+                            );
+                          }),
+                      // Glow effect — halo under the main route
+                      Polyline(
+                        points: tc.routePoints,
+                        color: const Color(0xFF2563EB).withValues(alpha: 0.18),
+                        strokeWidth: 16.0,
                       ),
-                    ),
-                  ...tc.deliveryStops.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final stop = entry.value;
-                    return Marker(
-                      point: LatLng(stop.lat, stop.lng),
-                      width: 48,
-                      height: 60,
-                      rotate: true,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF34C759),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 2.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF34C759).withValues(alpha: 0.55),
-                                  blurRadius: 12,
-                                  spreadRadius: 1,
-                                  offset: const Offset(0, 3),
-                                ),
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${index + 1}',
-                                style: const TextStyle(
+                      // Linha principal da rota (azul limpa e cristalina)
+                      Polyline(
+                        points: tc.routePoints,
+                        color: const Color(0xFF3B82F6),
+                        strokeWidth: 5.5,
+                      ),
+                    ],
+                  ),
+                MarkerLayer(
+                  markers: [
+                    if (_animatedCurrentPosition != null)
+                      Marker(
+                        point: _animatedCurrentPosition!,
+                        width: 54,
+                        height: 54,
+                        rotate: true,
+                        child: NavigationMarker(
+                          speed: _lastKnownSpeed,
+                          profileType: tc.truckProfile.type,
+                          heading: _heading,
+                        ),
+                      ),
+                    ...tc.deliveryStops.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final stop = entry.value;
+                      return Marker(
+                        point: LatLng(stop.lat, stop.lng),
+                        width: 48,
+                        height: 60,
+                        rotate: true,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF34C759),
+                                shape: BoxShape.circle,
+                                border: Border.all(
                                   color: Colors.white,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 15,
-                                  height: 1,
+                                  width: 2.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFF34C759,
+                                    ).withValues(alpha: 0.55),
+                                    blurRadius: 12,
+                                    spreadRadius: 1,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 15,
+                                    height: 1,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          // Ponteiro triangular
-                          CustomPaint(
-                            size: const Size(12, 8),
-                            painter: _PinPointerPainter(color: const Color(0xFF34C759)),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                  ...[...tc.customMarkers, ...tc.automaticPOIs].map(
-                    (m) {
+                            // Ponteiro triangular
+                            CustomPaint(
+                              size: const Size(12, 8),
+                              painter: _PinPointerPainter(
+                                color: const Color(0xFF34C759),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    ...[...tc.customMarkers, ...tc.automaticPOIs].map((m) {
                       final color = _markerColor(m.type);
                       final label = _markerLabel(m.type);
                       return Marker(
@@ -1369,7 +1432,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         rotate: true,
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 250),
-                          opacity: _currentZoom >= _markerVisibilityZoom ? 1.0 : 0.0,
+                          opacity: _currentZoom >= _markerVisibilityZoom
+                              ? 1.0
+                              : 0.0,
                           child: IgnorePointer(
                             ignoring: _currentZoom < _markerVisibilityZoom,
                             child: GestureDetector(
@@ -1406,10 +1471,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   // ── Label ──
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF0B0E17)
-                                          .withValues(alpha: 0.82),
+                                      color: const Color(
+                                        0xFF0B0E17,
+                                      ).withValues(alpha: 0.82),
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(
                                         color: color.withValues(alpha: 0.3),
@@ -1434,218 +1502,220 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           ),
                         ),
                       );
-                    },
-                  ),
-                ],
-              ),
-            ],
-          ),
+                    }),
+                  ],
+                ),
+              ],
+            ),
           ), // RepaintBoundary
-
           // ── BARRA DE BUSCA ───────────────────────────────────────────────────────────────────
           // Oculta durante navegação ativa para não distrair o motorista
           if (!tc.isNavigating)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 400),
-            curve: Curves.easeOutCubic,
-            top: _isFullScreen ? -200 : MediaQuery.of(context).padding.top + 12,
-            left: 16,
-            right: 16,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 250),
-              opacity: _isFullScreen ? 0.0 : 1.0,
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111318).withValues(alpha: 0.95),
-                      borderRadius: tc.suggestions.isNotEmpty
-                          ? const BorderRadius.vertical(
-                              top: Radius.circular(16),
-                            )
-                          : BorderRadius.circular(16),
-                      border: Border.all(
-                        color: const Color(0xFFE07B1A).withValues(alpha: 0.25),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: 'Para onde vamos, motorista?',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 15,
-                        ),
-                        border: InputBorder.none,
-                        icon: const Icon(
-                          Icons.search_rounded,
-                          color: Color(0xFFE07B1A),
-                          size: 20,
-                        ),
-                        suffixIcon: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Botão OCR / câmera
-                            if (_isOcrLoading)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 8),
-                                child: SizedBox(
-                                  width: 16, height: 16,
-                                  child: CircularProgressIndicator(
-                                    color: Color(0xFFE07B1A), strokeWidth: 2,
-                                  ),
-                                ),
-                              )
-                            else if (tc.destination == null && _searchController.text.isEmpty)
-                              IconButton(
-                                icon: const Icon(Icons.document_scanner_rounded, color: Color(0xFFE07B1A), size: 20),
-                                tooltip: 'Escanear nota fiscal',
-                                onPressed: _pickImageAndExtractAddress,
-                              ),
-                            // Botão limpar
-                            if (tc.destination != null || _searchController.text.isNotEmpty)
-                              IconButton(
-                                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  tc.clearRoute();
-                                  _mapController.rotate(0);
-                                  setState(() {
-                                    _offRouteCount = 0;
-                                    _isRecalculating = false;
-                                    _showReroutingBanner = false;
-                                  });
-                                },
-                              ),
-                            // ── Indicador de sinal GPS ─────────────────
-                            Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: GpsSignalDot(accuracy: _gpsAccuracy),
-                            ),
-                          ],
-                        ),
-                      ),
-                      onSubmitted: (value) async {
-                        if (value.isNotEmpty && _currentPosition != null) {
-                          final dest = await tc.searchAddress(
-                            value,
-                            _currentPosition!,
-                          );
-                          if (dest != null) _mapController.move(dest, 16);
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (tc.suggestions.isEmpty)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (tc.automaticPOIs.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8.0),
-                            child: FloatingActionButton.small(
-                              heroTag: 'clear_pois',
-                              backgroundColor: const Color(0xFF111318),
-                              onPressed: tc.clearAutomaticPOIs,
-                              child: const Icon(Icons.clear_all_rounded, color: Colors.white70),
-                            ),
-                          ),
-                        FloatingActionButton.extended(
-                          heroTag: 'find_pois',
-                          backgroundColor: const Color(0xFFE07B1A),
-                          icon: tc.isLoadingPOIs 
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.place_rounded, color: Colors.white, size: 20),
-                          label: Text(tc.isLoadingPOIs ? 'Buscando...' : 'Locais Próximos', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                          onPressed: tc.isLoadingPOIs ? null : () {
-                            if (_currentPosition != null) {
-                              tc.findNearbyPOIs(_currentPosition!);
-                            } else {
-                              showStyledSnackBar(
-                                context: context,
-                                message: 'Aguardando sinal de GPS...',
-                                icon: Icons.gps_off_rounded,
-                              );
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  if (tc.suggestions.isNotEmpty)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeOutCubic,
+              top: _isFullScreen
+                  ? -200
+                  : MediaQuery.of(context).padding.top + 12,
+              left: 16,
+              right: 16,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 250),
+                opacity: _isFullScreen ? 0.0 : 1.0,
+                child: Column(
+                  children: [
                     Container(
-                      constraints: const BoxConstraints(maxHeight: 240),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF111318).withValues(alpha: 0.97),
-                        borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(16),
-                        ),
+                        color: const Color(0xFF111318).withValues(alpha: 0.95),
+                        borderRadius: tc.suggestions.isNotEmpty
+                            ? const BorderRadius.vertical(
+                                top: Radius.circular(16),
+                              )
+                            : BorderRadius.circular(16),
                         border: Border.all(
-                          color: const Color(0xFFE07B1A).withValues(alpha: 0.15),
+                          color: const Color(
+                            0xFFE07B1A,
+                          ).withValues(alpha: 0.25),
                         ),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.4),
                             blurRadius: 16,
-                            offset: const Offset(0, 8),
+                            offset: const Offset(0, 4),
                           ),
                         ],
                       ),
-                      child: ListView.separated(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        itemCount: tc.suggestions.length,
-                        separatorBuilder: (context, index) => Divider(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          height: 1,
-                          indent: 44,
-                        ),
-                        itemBuilder: (_, i) {
-                          final s = tc.suggestions[i];
-                          return ListTile(
-                            dense: true,
-                            leading: const Icon(
-                              Icons.location_on_rounded,
-                              color: Color(0xFFE07B1A),
-                              size: 18,
+                      child: Row(
+                        children: [
+                          // Botão Hamburguer integrado no canto esquerdo da busca
+                          IconButton(
+                            icon: const Icon(
+                              Icons.menu_rounded,
+                              color: Colors.white70,
+                              size: 22,
                             ),
-                            title: Text(
-                              s,
+                            tooltip: 'Menu',
+                            onPressed: () => Scaffold.of(context).openDrawer(),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _searchController,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 14,
+                                fontSize: 15,
                               ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              decoration: InputDecoration(
+                                hintText: 'Para onde vamos, motorista?',
+                                hintStyle: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.35),
+                                  fontSize: 14,
+                                ),
+                                border: InputBorder.none,
+                                prefixIcon: const Icon(
+                                  Icons.search_rounded,
+                                  color: Color(0xFFE07B1A),
+                                  size: 19,
+                                ),
+                                suffixIcon: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Botão OCR / câmera
+                                    if (_isOcrLoading)
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 8),
+                                        child: SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            color: Color(0xFFE07B1A),
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                      )
+                                    else if (tc.destination == null &&
+                                        _searchController.text.isEmpty)
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.document_scanner_rounded,
+                                          color: Color(0xFFE07B1A),
+                                          size: 20,
+                                        ),
+                                        tooltip: 'Escanear nota fiscal',
+                                        onPressed: _pickImageAndExtractAddress,
+                                      ),
+                                    // Botão limpar
+                                    if (tc.destination != null ||
+                                        _searchController.text.isNotEmpty)
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.close_rounded,
+                                          color: Colors.white38,
+                                          size: 18,
+                                        ),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          tc.clearRoute();
+                                          _mapController.rotate(0);
+                                          setState(() {
+                                            _offRouteCount = 0;
+                                            _isRecalculating = false;
+                                            _showReroutingBanner = false;
+                                          });
+                                        },
+                                      ),
+                                    // ── Indicador de sinal GPS ─────────────────
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: GpsSignalDot(accuracy: _gpsAccuracy),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              onSubmitted: (value) async {
+                                if (value.isNotEmpty && _currentPosition != null) {
+                                  final dest = await tc.searchAddress(
+                                    value,
+                                    _currentPosition!,
+                                  );
+                                  if (dest != null) _mapController.move(dest, 16);
+                                }
+                              },
                             ),
-                            onTap: () async {
-                              _searchController.text = s;
-                              FocusScope.of(context).unfocus();
-                              if (_currentPosition != null) {
-                                final dest = await tc.searchAddress(
-                                  s,
-                                  _currentPosition!,
-                                );
-                                if (dest != null) _mapController.move(dest, 16);
-                              }
-                            },
-                          );
-                        },
+                          ),
+                        ],
                       ),
                     ),
-                ],
+                    if (tc.suggestions.isNotEmpty)
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 240),
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFF111318,
+                          ).withValues(alpha: 0.97),
+                          borderRadius: const BorderRadius.vertical(
+                            bottom: Radius.circular(16),
+                          ),
+                          border: Border.all(
+                            color: const Color(
+                              0xFFE07B1A,
+                            ).withValues(alpha: 0.15),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.4),
+                              blurRadius: 16,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: ListView.separated(
+                          padding: EdgeInsets.zero,
+                          shrinkWrap: true,
+                          itemCount: tc.suggestions.length,
+                          separatorBuilder: (context, index) => Divider(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            height: 1,
+                            indent: 44,
+                          ),
+                          itemBuilder: (_, i) {
+                            final s = tc.suggestions[i];
+                            return ListTile(
+                              dense: true,
+                              leading: const Icon(
+                                Icons.location_on_rounded,
+                                color: Color(0xFFE07B1A),
+                                size: 18,
+                              ),
+                              title: Text(
+                                s,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onTap: () async {
+                                _searchController.text = s;
+                                FocusScope.of(context).unfocus();
+                                if (_currentPosition != null) {
+                                  final dest = await tc.searchAddress(
+                                    s,
+                                    _currentPosition!,
+                                  );
+                                  if (dest != null)
+                                    _mapController.move(dest, 16);
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
 
           // ── BANNER DE RECÁLCULO DE ROTA ───────────────────────────────────
           Positioned(
@@ -1719,14 +1789,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
           // ── PAINEL DE NAVEGAÇÃO ───────────────────────────────────────────
           // Quando o painel some, zera o notifier para os botões descerem
-          if (tc.routePoints.isEmpty || tc.suggestions.isNotEmpty || _isFullScreen)
-            Builder(builder: (_) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (_panelSizeNotifier.value != 0) _panelSizeNotifier.value = 0;
-              });
-              return const SizedBox.shrink();
-            }),
-          if (tc.routePoints.isNotEmpty && tc.suggestions.isEmpty && !_isFullScreen)
+          if (tc.routePoints.isEmpty ||
+              tc.suggestions.isNotEmpty ||
+              _isFullScreen)
+            Builder(
+              builder: (_) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_panelSizeNotifier.value != 0)
+                    _panelSizeNotifier.value = 0;
+                });
+                return const SizedBox.shrink();
+              },
+            ),
+          if (tc.routePoints.isNotEmpty &&
+              tc.suggestions.isEmpty &&
+              !_isFullScreen)
             // NavigationPanel é um DraggableScrollableSheet — deve ser filho
             // direto do Stack (sem Positioned) para funcionar corretamente
             NavigationPanel(
@@ -1780,9 +1857,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     _showNavBanner = true;
                   });
                   _navBannerTimer?.cancel();
-                  _navBannerTimer = Timer(const Duration(milliseconds: 2500), () {
-                    if (mounted) setState(() => _showNavBanner = false);
-                  });
+                  _navBannerTimer = Timer(
+                    const Duration(milliseconds: 2500),
+                    () {
+                      if (mounted) setState(() => _showNavBanner = false);
+                    },
+                  );
                   if (_currentPosition != null) {
                     _moveNavigationCamera(
                       _currentPosition!,
@@ -1833,7 +1913,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           // Posicionado abaixo do ManeuverHud quando navegando
           if (tc.isNavigating && tc.routePoints.isNotEmpty)
             Positioned(
-              top: MediaQuery.of(context).padding.top + (tc.isNavigating ? 108 : 76),
+              top:
+                  MediaQuery.of(context).padding.top +
+                  (tc.isNavigating ? 108 : 76),
               left: 0,
               right: 0,
               child: ProactiveAlertHud(
@@ -1889,7 +1971,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           icon: prefs.ttsEnabled
                               ? Icons.volume_up_rounded
                               : Icons.volume_off_rounded,
-                          isPrimary: !prefs.ttsEnabled, // fica em destaque vermelho/tema se mutado
+                          isPrimary: !prefs
+                              .ttsEnabled, // fica em destaque vermelho/tema se mutado
                           onPressed: () {
                             prefs.setTtsEnabled(!prefs.ttsEnabled);
                             showStyledSnackBar(
@@ -1958,7 +2041,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 12),
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF111318).withValues(alpha: 0.97),
                     borderRadius: BorderRadius.circular(16),
@@ -2005,7 +2090,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
               ),
             ),
-
         ],
       ),
     );
@@ -2061,7 +2145,9 @@ class _LargeMapButton extends StatelessWidget {
           ),
           child: Icon(
             icon,
-            color: isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.85),
+            color: isPrimary
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.85),
             size: 26,
           ),
         ),
@@ -2156,8 +2242,8 @@ class _SpeedHud extends StatelessWidget {
               color: kmh > 80
                   ? const Color(0xFFFF3B30)
                   : kmh > 60
-                      ? const Color(0xFFFF9500)
-                      : Colors.white,
+                  ? const Color(0xFFFF9500)
+                  : Colors.white,
               fontSize: 26,
               fontWeight: FontWeight.w900,
               height: 1,
@@ -2201,7 +2287,10 @@ class _FullscreenHudState extends State<_FullscreenHud> {
   void initState() {
     super.initState();
     _updateTime();
-    _clockTimer = Timer.periodic(const Duration(seconds: 10), (_) => _updateTime());
+    _clockTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _updateTime(),
+    );
   }
 
   @override
@@ -2212,7 +2301,8 @@ class _FullscreenHudState extends State<_FullscreenHud> {
 
   void _updateTime() {
     final now = DateTime.now();
-    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     if (_timeString != timeStr) {
       setState(() => _timeString = timeStr);
     }
@@ -2229,8 +2319,8 @@ class _FullscreenHudState extends State<_FullscreenHud> {
     final speedColor = kmh > 80
         ? AppColors.danger
         : kmh > 60
-            ? AppColors.attention
-            : Colors.white;
+        ? AppColors.attention
+        : Colors.white;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
@@ -2277,17 +2367,9 @@ class _FullscreenHudState extends State<_FullscreenHud> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Container(
-                    width: 1.5,
-                    height: 12,
-                    color: AppColors.divider,
-                  ),
+                  Container(width: 1.5, height: 12, color: AppColors.divider),
                   const SizedBox(width: 12),
-                  Icon(
-                    Icons.explore_rounded,
-                    size: 11,
-                    color: AppColors.blue,
-                  ),
+                  Icon(Icons.explore_rounded, size: 11, color: AppColors.blue),
                   const SizedBox(width: 4),
                   Text(
                     _cardinal(widget.heading),
@@ -2350,18 +2432,12 @@ class _ProfileTag extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            color: Colors.white.withValues(alpha: 0.35),
-            size: 11,
-          ),
+          Icon(icon, color: Colors.white.withValues(alpha: 0.35), size: 11),
           const SizedBox(width: 4),
           Text(
             label,
@@ -2376,4 +2452,3 @@ class _ProfileTag extends StatelessWidget {
     );
   }
 }
-

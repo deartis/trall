@@ -8,8 +8,6 @@ import 'package:share_plus/share_plus.dart';
 import '../core/app_colors.dart';
 import '../controllers/truck_controller.dart';
 import 'avoid_options_sheet.dart';
-import 'route_risk_bar.dart';
-import '../models/road_analysis.dart';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -230,16 +228,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                   onStop: widget.onStop,
                 ),
 
-                // Risk Bar
-                if (tc.routeAnalysisSegments.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  RouteRiskBar(
-                    segments: tc.routeAnalysisSegments,
-                    totalDistanceMeters:
-                        tc.routePoints.isEmpty ? 1 : _totalRouteDistance(tc),
-                    progressMeters: tc.progressOnRouteMeters,
-                  ),
-                ],
+
 
                 // Quick-Add marker
                 if (widget.onAddMarkerAtCurrentPosition != null) ...[
@@ -271,10 +260,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                 _SectionDivider(label: 'PERCURSO COMPLETO'),
                 const SizedBox(height: 8),
                 _TurnByTurnList(tc: tc),
-                if (tc.routeAnalysisFindings.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _FindingsList(tc: tc),
-                ],
+
               ]
 
               // ════════════════════════════════════════════════════
@@ -364,16 +350,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                   ),
                 ),
 
-                // Risk Bar
-                if (tc.routeAnalysisSegments.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  RouteRiskBar(
-                    segments: tc.routeAnalysisSegments,
-                    totalDistanceMeters:
-                        tc.routePoints.isEmpty ? 1 : _totalRouteDistance(tc),
-                    progressMeters: tc.progressOnRouteMeters,
-                  ),
-                ],
+
 
                 // ── Chips de ação ────────────────────────────────
                 const SizedBox(height: 14),
@@ -489,7 +466,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                         ? _maneuverLabel(step.type, step.modifier)
                         : 'Toque em GO para iniciar';
                     final subText = step != null
-                        ? '${step.formattedDistance}${step.streetName.isNotEmpty ? ' — ${step.streetName}' : ''}'
+                        ? '${tc.formattedDistanceToNextStep}${step.streetName.isNotEmpty ? ' — ${step.streetName}' : ''}'
                         : 'A rota está calculada e pronta';
 
                     return Row(
@@ -549,10 +526,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
                   _SectionDivider(label: 'PERCURSO COMPLETO'),
                   const SizedBox(height: 8),
                   _TurnByTurnList(tc: tc),
-                  if (tc.routeAnalysisFindings.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _FindingsList(tc: tc),
-                  ],
+
                 ],
               ],
 
@@ -565,11 +539,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
     );
   }
 
-  double _totalRouteDistance(TruckController tc) {
-    if (tc.routeAnalysisSegments.isEmpty) return tc.routePoints.length.toDouble();
-    return tc.routeAnalysisSegments.fold(0.0, (sum, s) => sum + s.distanceMeters);
   }
-}
 
 // ─────────────────────────────────────────────────────────────
 //  Timer de fadiga com cor gradual
@@ -769,103 +739,7 @@ class _TurnByTurnList extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Lista de findings de risco (painel expandido)
-// ─────────────────────────────────────────────────────────────
-class _FindingsList extends StatelessWidget {
-  const _FindingsList({required this.tc});
-  final TruckController tc;
 
-  Color _severityColor(RoadHazardLevel l) => switch (l) {
-    RoadHazardLevel.safe      => AppColors.safe,
-    RoadHazardLevel.attention => AppColors.attention,
-    RoadHazardLevel.heavy     => AppColors.heavy,
-    RoadHazardLevel.avoid     => AppColors.danger,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'ALERTAS DE RISCO',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.25),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-              ),
-            ],
-          ),
-        ),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          itemCount: tc.routeAnalysisFindings.length,
-          itemBuilder: (_, i) {
-            final f = tc.routeAnalysisFindings[i];
-            final color = _severityColor(f.severity);
-            return Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: color.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: color, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          f.title,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          f.detail,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.4),
-                            fontSize: 11,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers de manobra OSRM → ícone / texto PT-BR
@@ -940,7 +814,7 @@ class _NavigatingPeek extends StatelessWidget {
         ? _maneuverLabel(step.type, step.modifier)
         : 'Continue em frente';
     final streetName = step?.streetName ?? '';
-    final distanceText = step?.formattedDistance ?? '';
+    final distanceText = tc.formattedDistanceToNextStep;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),

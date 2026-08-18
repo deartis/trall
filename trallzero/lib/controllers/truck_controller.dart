@@ -57,6 +57,17 @@ class TruckController extends ChangeNotifier {
   bool _isNavigating = false;
   int _currentStepIndex = 0;
 
+  LatLng? _lastKnownUserPosition;
+  bool _hasSpoken500mAlert = false;
+  bool _hasSpoken200mAlert = false;
+  bool _hasSpokenImmediateAlert = false;
+
+  void _resetStepVoiceAlertFlags() {
+    _hasSpoken500mAlert = false;
+    _hasSpoken200mAlert = false;
+    _hasSpokenImmediateAlert = false;
+  }
+
   bool _avoidTolls = false;
   bool _avoidFerries = false;
   bool _avoidUnpaved = false;
@@ -124,14 +135,41 @@ class TruckController extends ChangeNotifier {
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
   }
 
-  /// Próxima manobra da rota selecionada (null se não há steps)
+  /// Próxima manobra da rota selecionada (null se não há steps).
+  /// Retorna a manobra que o motorista deve realizar a seguir.
   RouteStep? get nextStep {
     final route = _availableRoutes.isNotEmpty
         ? _availableRoutes[_selectedRouteIndex]
         : null;
     if (route == null || route.steps.isEmpty) return null;
-    final idx = _currentStepIndex.clamp(0, route.steps.length - 1);
-    return route.steps[idx];
+    final upcomingIdx = (_currentStepIndex + 1 < route.steps.length)
+        ? _currentStepIndex + 1
+        : route.steps.length - 1;
+    return route.steps[upcomingIdx];
+  }
+
+  /// Distância em metros da posição atual do motorista até a próxima manobra
+  double? get distanceToNextStepMeters {
+    final step = nextStep;
+    if (step == null || _lastKnownUserPosition == null) return null;
+    return const Distance().as(
+      LengthUnit.Meter,
+      _lastKnownUserPosition!,
+      step.location,
+    );
+  }
+
+  /// Distância formatada em tempo real para a próxima manobra ("350 m" / "1,2 km")
+  String get formattedDistanceToNextStep {
+    final dist = distanceToNextStepMeters;
+    if (dist == null) {
+      final step = nextStep;
+      return step?.formattedDistance ?? '';
+    }
+    if (dist >= 1000) {
+      return '${(dist / 1000).toStringAsFixed(1)} km';
+    }
+    return '${dist.toInt()} m';
   }
 
   String get formattedDistance {
@@ -184,6 +222,7 @@ class TruckController extends ChangeNotifier {
     _isNavigating = !_isNavigating;
     if (_isNavigating) {
       _currentStepIndex = 0;
+      _resetStepVoiceAlertFlags();
 
       // Restaura segundos de fadiga persistidos (caso o app tenha fechado
       // enquanto o motorista estava dirigindo).
@@ -193,8 +232,12 @@ class TruckController extends ChangeNotifier {
 
       final step = nextStep;
       if (step != null) {
+        final distMeters = distanceToNextStepMeters?.toInt() ?? step.distance.toInt();
+        final street = step.streetName.isNotEmpty ? ' na ${step.streetName}' : '';
         TtsService.instance.speak(
-            'Navegação iniciada. Em ${step.distance.toInt()} metros, ${step.translatedManeuver}');
+            'Navegação iniciada. Em $distMeters metros, ${step.translatedManeuver}$street');
+        if (distMeters <= 500) _hasSpoken500mAlert = true;
+        if (distMeters <= 200) _hasSpoken200mAlert = true;
       } else {
         TtsService.instance.speak('Navegação iniciada.');
       }
@@ -238,33 +281,76 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Avança para o próximo step quando o motorista passa pela manobra.
+  /// Avança para o próximo step quando o motorista passa pela manobra
+  /// e gerencia os alertas sonoros em tempo real com antecedência adequada.
   /// Chamado pelo MapScreen a cada update de GPS.
-  void updateCurrentStep(LatLng position) {
+  void updateCurrentStep(LatLng position, {double speed = 0.0}) {
+    _lastKnownUserPosition = position;
+
     final route = _availableRoutes.isNotEmpty
         ? _availableRoutes[_selectedRouteIndex]
         : null;
     if (route == null || route.steps.isEmpty) return;
     if (_currentStepIndex >= route.steps.length - 1) return;
 
-    final nextManeuver = route.steps[_currentStepIndex];
+    final upcomingManeuver = nextStep;
+    if (upcomingManeuver == null) return;
+
     final dist = const Distance().as(
       LengthUnit.Meter,
       position,
-      nextManeuver.location,
+      upcomingManeuver.location,
     );
 
-    // Avança o step quando está a menos de 30m do ponto de manobra
-    if (dist < 30) {
+    // Threshold iminente ajustado dinamicamente pela velocidade
+    // A >60 km/h (~16.6 m/s), avisa a 50m para dar tempo de reação. Em menor velocidade, 35m.
+    final double immediateThreshold = (speed > 16.6) ? 50.0 : 35.0;
+
+    // 1. Alerta de antecedência média (~500m)
+    if (dist <= 600 && dist > 250 && !_hasSpoken500mAlert) {
+      _hasSpoken500mAlert = true;
+      final roundedDist = (dist ~/ 50) * 50;
+      final street = upcomingManeuver.streetName.isNotEmpty
+          ? ' na ${upcomingManeuver.streetName}'
+          : '';
+      TtsService.instance.speak(
+        'Em $roundedDist metros, ${upcomingManeuver.translatedManeuver}$street',
+      );
+    }
+    // 2. Alerta de proximidade (~150m-200m)
+    else if (dist <= 200 && dist > immediateThreshold + 15 && !_hasSpoken200mAlert) {
+      _hasSpoken200mAlert = true;
+      final roundedDist = (dist ~/ 10) * 10;
+      final street = upcomingManeuver.streetName.isNotEmpty
+          ? ' na ${upcomingManeuver.streetName}'
+          : '';
+      TtsService.instance.speak(
+        'Em $roundedDist metros, ${upcomingManeuver.translatedManeuver}$street',
+      );
+    }
+    // 3. Alerta iminente ("Vire à esquerda agora")
+    else if (dist <= immediateThreshold && dist > 15 && !_hasSpokenImmediateAlert) {
+      _hasSpokenImmediateAlert = true;
+      final street = upcomingManeuver.streetName.isNotEmpty
+          ? ' na ${upcomingManeuver.streetName}'
+          : '';
+      TtsService.instance.speak(
+        '${upcomingManeuver.translatedManeuver} agora$street',
+      );
+    }
+
+    // Avança o step quando fica a 20m ou menos do ponto de manobra
+    if (dist <= 20) {
       _currentStepIndex++;
-      
-      final step = nextStep;
-      if (step != null) {
-        final phrase = 'Em ${step.distance.toInt()} metros, ${step.translatedManeuver}'
-            '${step.streetName.isNotEmpty ? ' na ${step.streetName}' : ''}';
-        TtsService.instance.speak(phrase);
+      _resetStepVoiceAlertFlags();
+
+      final newUpcoming = nextStep;
+      if (newUpcoming != null && newUpcoming.type == 'arrive') {
+        TtsService.instance.speak('Você está chegando ao seu destino.');
       }
-      
+
+      notifyListeners();
+    } else {
       notifyListeners();
     }
   }
@@ -306,7 +392,7 @@ class TruckController extends ChangeNotifier {
       final encodedQuery = Uri.encodeComponent(query);
       String url =
           'https://nominatim.openstreetmap.org/search'
-          '?q=$encodedQuery&format=json&limit=6&countrycodes=br';
+          '?q=$encodedQuery&format=jsonv2&addressdetails=1&limit=6&countrycodes=br';
 
       if (userLocation != null) {
         // viewbox apenas PRIORIZA a região próxima — não bloqueia
@@ -339,12 +425,13 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Geocodifica [address] e configura como destino.
+  /// Geocodifica [address] e configura como destino com precisão de número predial.
   ///
-  /// Fluxo de fallback:
-  ///   1. Se for CEP → ViaCEP + geocode direto (mais preciso)
-  ///   2. Nominatim search
-  ///   3. geocoding package (fallback final)
+  /// Fluxo de alta precisão:
+  ///   1. Se for CEP → ViaCEP + geocode direto
+  ///   2. Nominatim v2 com addressdetails=1 e busca estruturada por número de casa
+  ///   3. Photon API da Komoot (otimizado para números de edifícios do OSM)
+  ///   4. Native geocoding package (fallback final)
   Future<LatLng?> searchAddress(String address, LatLng userLocation) async {
     try {
       _isRouting = true;
@@ -365,12 +452,17 @@ class TruckController extends ChangeNotifier {
         }
       }
 
-      // ── 2. Nominatim direto ────────────────────────────────────
+      // ── 2. Nominatim v2 com precisão de número de casa e viewbox ───────
       try {
         final encoded = Uri.encodeComponent(address);
+        final lat = userLocation.latitude;
+        final lon = userLocation.longitude;
+        const offset = 1.0;
+        final viewBox = '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
+        
         final uri = Uri.parse(
           'https://nominatim.openstreetmap.org/search'
-          '?q=$encoded&format=json&limit=1&countrycodes=br',
+          '?q=$encoded&format=jsonv2&addressdetails=1&limit=5&countrycodes=br&viewbox=$viewBox',
         );
         final response = await http
             .get(uri, headers: {'User-Agent': 'TrallApp/1.0'})
@@ -379,10 +471,21 @@ class TruckController extends ChangeNotifier {
         if (response.statusCode == 200) {
           final List data = json.decode(response.body);
           if (data.isNotEmpty) {
-            final lat = double.tryParse(data[0]['lat'] as String? ?? '');
-            final lon = double.tryParse(data[0]['lon'] as String? ?? '');
-            if (lat != null && lon != null) {
-              final point = LatLng(lat, lon);
+            // Procura se há um resultado com número de casa exato
+            Map<String, dynamic>? selectedItem;
+            for (final item in data) {
+              final addr = item['address'] as Map<String, dynamic>?;
+              if (addr != null && addr.containsKey('house_number')) {
+                selectedItem = item as Map<String, dynamic>;
+                break;
+              }
+            }
+            selectedItem ??= data.first as Map<String, dynamic>;
+
+            final resLat = double.tryParse(selectedItem['lat'] as String? ?? '');
+            final resLon = double.tryParse(selectedItem['lon'] as String? ?? '');
+            if (resLat != null && resLon != null) {
+              final point = LatLng(resLat, resLon);
               await setDestination(point, userLocation);
               await RecentDestinations.saveDestination(address);
               return point;
@@ -390,10 +493,41 @@ class TruckController extends ChangeNotifier {
           }
         }
       } catch (e) {
-        debugPrint('[Search] Nominatim falhou, tentando geocoding pkg: $e');
+        debugPrint('[Search] Nominatim falhou: $e');
       }
 
-      // ── 3. Fallback: geocoding package ────────────────────────
+      // ── 3. Fallback: Photon API (Geocoding de alta precisão OSM) ───────
+      try {
+        final encoded = Uri.encodeComponent(address);
+        final uri = Uri.parse(
+          'https://photon.komoot.io/api/?q=$encoded&lat=${userLocation.latitude}&lon=${userLocation.longitude}&limit=5',
+        );
+        final response = await http.get(uri).timeout(_httpTimeout);
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final features = data['features'] as List<dynamic>? ?? [];
+          if (features.isNotEmpty) {
+            Map<String, dynamic>? selectedFeature;
+            for (final feat in features) {
+              final props = feat['properties'] as Map<String, dynamic>?;
+              if (props != null && props.containsKey('housenumber')) {
+                selectedFeature = feat as Map<String, dynamic>;
+                break;
+              }
+            }
+            selectedFeature ??= features.first as Map<String, dynamic>;
+            final coords = selectedFeature['geometry']['coordinates'] as List<dynamic>;
+            final point = LatLng((coords[1] as num).toDouble(), (coords[0] as num).toDouble());
+            await setDestination(point, userLocation);
+            await RecentDestinations.saveDestination(address);
+            return point;
+          }
+        }
+      } catch (e) {
+        debugPrint('[Search] Photon API falhou: $e');
+      }
+
+      // ── 4. Fallback: geocoding package nativo ──────────────────
       final locations = await locationFromAddress(address);
       if (locations.isNotEmpty) {
         final point =
