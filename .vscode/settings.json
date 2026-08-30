@@ -1,0 +1,4 @@
+{
+    "prisma.pinToPrisma6": true,
+    "java.configuration.updateBuildConfiguration": "automatic"
+}
