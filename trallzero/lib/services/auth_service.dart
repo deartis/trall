@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import 'preferences_service.dart';
+import 'user_score_service.dart';
 
 class AuthService extends ChangeNotifier {
   static final AuthService instance = AuthService._();
@@ -28,6 +29,10 @@ class AuthService extends ChangeNotifier {
       _currentUser = await _googleSignIn.signInSilently();
       if (_currentUser != null) {
         debugPrint('✅ Sessão Google restaurada: ${_currentUser!.email}');
+        final userId = PreferencesService.instance.prefs.getInt('userId');
+        if (userId != null) {
+          UserScoreService.instance.syncWithBackend(userId: userId);
+        }
         notifyListeners();
       }
     } catch (e) {
@@ -101,6 +106,7 @@ class AuthService extends ChangeNotifier {
         await PreferencesService.instance.prefs.setInt('userId', userId);
         ApiService.instance.setUserId(userId);
         debugPrint('✅ Login Google bem-sucedido! userId: $userId');
+        await UserScoreService.instance.syncWithBackend(userId: userId);
       } else {
         debugPrint('❌ Falha no backend: ${response.body}');
       }

@@ -32,6 +32,8 @@ import '../services/marker_deduplication_service.dart';
 import '../widgets/marker_conflict_sheet.dart';
 import '../services/user_score_service.dart';
 import '../widgets/score_earned_overlay.dart';
+import '../models/user_rank.dart';
+import '../services/api_service.dart';
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -1293,6 +1295,87 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ],
             ),
             const SizedBox(height: 16),
+            // Autor do Alerta e Patente (Reputação Comunitária)
+            if (marker.authorName != null && marker.authorName!.isNotEmpty) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person_pin_rounded,
+                      color: UserRank.getRank(marker.authorXp ?? 0).color,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Reportado por',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 11,
+                            ),
+                          ),
+                          Text(
+                            marker.authorName!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: UserRank.getRank(marker.authorXp ?? 0)
+                            .color
+                            .withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: UserRank.getRank(marker.authorXp ?? 0)
+                              .color
+                              .withValues(alpha: 0.4),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            UserRank.getRank(marker.authorXp ?? 0).emoji,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            UserRank.getRank(marker.authorXp ?? 0).title,
+                            style: TextStyle(
+                              color: UserRank.getRank(marker.authorXp ?? 0).color,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             // Contador de confirmações da comunidade
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1351,8 +1434,28 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 onPressed: () async {
                   context.read<TruckController>().confirmMarker(marker.id);
                   Navigator.pop(ctx);
-                  final scoreEvent = await UserScoreService.instance
+
+                  // Validação remota na API
+                  final alertId = int.tryParse(marker.id);
+                  ScoreEvent? scoreEvent;
+                  if (alertId != null) {
+                    final apiRes = await ApiService.instance
+                        .validateAlert(alertId, isHelpful: true);
+                    if (apiRes != null && apiRes['userScore'] != null) {
+                      scoreEvent = await UserScoreService.instance.applyRemoteScore(
+                        apiRes['userScore'] as Map<String, dynamic>,
+                        pointsEarned:
+                            (apiRes['xpEarned'] as num?)?.toInt() ??
+                                UserScoreService.xpForConfirmation,
+                        reason: 'Presença Confirmada!',
+                      );
+                    }
+                  }
+
+                  // Fallback local se a API estiver offline
+                  scoreEvent ??= await UserScoreService.instance
                       .addScoreForConfirmation();
+
                   if (mounted) {
                     ScoreEarnedOverlay.show(context, scoreEvent);
                   }
@@ -2207,14 +2310,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             valueListenable: _panelSizeNotifier,
             builder: (context, panelSize, child) {
               final screenH = MediaQuery.of(context).size.height;
+              final safeBottom = MediaQuery.of(context).padding.bottom;
+              final hasRoute = tc.isNavigating || tc.routePoints.isNotEmpty;
+              final double bottomBarOffset = hasRoute ? 0.0 : (64.0 + safeBottom);
+
               final double buttonBottom;
               if (_isFullScreen) {
-                buttonBottom = MediaQuery.of(context).padding.bottom + 16;
+                buttonBottom = safeBottom + 16;
               } else {
                 final panelPixels = panelSize > 0
                     ? (panelSize * screenH).clamp(0.0, screenH * 0.65)
                     : 0.0;
-                buttonBottom = panelPixels + 16;
+                buttonBottom = panelPixels + bottomBarOffset + 16;
               }
 
               final prefs = context.watch<PreferencesService>();

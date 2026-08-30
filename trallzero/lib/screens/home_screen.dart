@@ -66,7 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final tc = context.watch<TruckController>();
-    final isNavigating = tc.isNavigating;
+    final hasRoute = tc.isNavigating || tc.routePoints.isNotEmpty;
 
     return Scaffold(
       // Drawer mantido para configurações e itens secundários
@@ -74,12 +74,12 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Builder(
         builder: (ctx) => Stack(
           children: [
-            // ── Mapa (tela cheia, sempre presente) ─────────────────
+            // ── Mapa (tela cheia, 100% da altura até a borda inferior) ────
             const MapScreen(),
 
             // ── Atalhos rápidos (Locais Próximos + Recentes) ─────────
             // Aparecem abaixo da barra de busca quando sem rota ativa
-            if (!isNavigating && !tc.isRouting && tc.suggestions.isEmpty)
+            if (!hasRoute && !tc.isRouting && tc.suggestions.isEmpty)
               _QuickAccessBar(
                 onAddressTap: (address) async {
                   Navigator.of(ctx); // mantém contexto
@@ -94,13 +94,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   await truckCtrl.searchAddress(address, startLoc);
                 },
               ),
+
+            // ── Bottom Navigation Bar (Overlay no rodapé) ────────────
+            // Posicionado diretamente no Stack para que o mapa e o NavigationPanel
+            // ocupem toda a tela sem criar a tarja preta reservada pelo Scaffold
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: TrallBottomNav(
+                currentIndex: _tabIndex,
+                onTap: _onTabTapped,
+              ),
+            ),
           ],
         ),
-      ),
-      // ── Bottom Navigation Bar ────────────────────────────────────
-      bottomNavigationBar: TrallBottomNav(
-        currentIndex: _tabIndex,
-        onTap: _onTabTapped,
       ),
     );
   }

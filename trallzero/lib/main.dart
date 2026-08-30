@@ -22,6 +22,7 @@ void main() async {
   await PreferencesService.instance.init();
   await UserScoreService.instance.init();
   await ApiService.instance.init();
+  UserScoreService.instance.syncWithBackend(); // Sincroniza em segundo plano
   await AuthService.instance.tryRestoreSession();
   await BackgroundNavigationService.initialize();
   

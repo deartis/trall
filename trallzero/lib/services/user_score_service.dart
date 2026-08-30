@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_rank.dart';
+import 'api_service.dart';
 
 /// Evento disparado quando o motorista ganha pontos
 class ScoreEvent {
@@ -54,6 +55,9 @@ class UserScoreService extends ChangeNotifier {
   UserRank get currentRank => UserRank.getRank(_xp);
   Stream<ScoreEvent> get onScoreEarned => _scoreEventController.stream;
 
+  bool _isSyncing = false;
+  bool get isSyncing => _isSyncing;
+
   Future<void> init() async {
     if (_isInitialized) return;
     _prefs = await SharedPreferences.getInstance();
@@ -65,6 +69,85 @@ class UserScoreService extends ChangeNotifier {
 
     _isInitialized = true;
     notifyListeners();
+  }
+
+  /// Sincroniza a pontuação com a API central
+  Future<void> syncWithBackend({int? userId}) async {
+    final uid = userId ?? _prefs.getInt('userId');
+    if (uid == null) return;
+
+    _isSyncing = true;
+    notifyListeners();
+
+    try {
+      final profile = await ApiService.instance.fetchUserProfile(uid);
+      if (profile != null) {
+        _xp = (profile['xp'] as num?)?.toInt() ?? _xp;
+        _reportsCount = (profile['reportsCount'] as num?)?.toInt() ?? _reportsCount;
+        _confirmationsCount =
+            (profile['confirmationsCount'] as num?)?.toInt() ?? _confirmationsCount;
+        _correctionsCount =
+            (profile['correctionsCount'] as num?)?.toInt() ?? _correctionsCount;
+
+        if (_isInitialized) {
+          await _prefs.setInt(_keyXp, _xp);
+          await _prefs.setInt(_keyReports, _reportsCount);
+          await _prefs.setInt(_keyConfirmations, _confirmationsCount);
+          await _prefs.setInt(_keyCorrections, _correctionsCount);
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao sincronizar pontuação com a API: $e');
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Aplica dados de pontuação retornados diretamente por uma resposta da API
+  Future<ScoreEvent?> applyRemoteScore(
+    Map<String, dynamic> remoteData, {
+    int? pointsEarned,
+    String? reason,
+  }) async {
+    final oldRank = UserRank.getRank(_xp);
+
+    if (remoteData['xp'] != null) {
+      _xp = (remoteData['xp'] as num).toInt();
+    }
+    if (remoteData['reportsCount'] != null) {
+      _reportsCount = (remoteData['reportsCount'] as num).toInt();
+    }
+    if (remoteData['confirmationsCount'] != null) {
+      _confirmationsCount = (remoteData['confirmationsCount'] as num).toInt();
+    }
+    if (remoteData['correctionsCount'] != null) {
+      _correctionsCount = (remoteData['correctionsCount'] as num).toInt();
+    }
+
+    if (_isInitialized) {
+      await _prefs.setInt(_keyXp, _xp);
+      await _prefs.setInt(_keyReports, _reportsCount);
+      await _prefs.setInt(_keyConfirmations, _confirmationsCount);
+      await _prefs.setInt(_keyCorrections, _correctionsCount);
+    }
+
+    final newRank = UserRank.getRank(_xp);
+    final leveledUp = newRank.level > oldRank.level;
+
+    notifyListeners();
+
+    if (pointsEarned != null && pointsEarned > 0) {
+      final event = ScoreEvent(
+        points: pointsEarned,
+        reason: reason ?? 'Pontos recebidos!',
+        leveledUp: leveledUp,
+        currentRank: newRank,
+      );
+      _scoreEventController.add(event);
+      return event;
+    }
+    return null;
   }
 
   /// Adiciona pontuação para um novo alerta criado na via

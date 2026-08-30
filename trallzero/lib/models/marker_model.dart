@@ -23,6 +23,9 @@ class TruckerMarker {
   final int confirmations; // Quantidade de confirmações de motoristas
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final int? authorId;
+  final String? authorName;
+  final int? authorXp;
 
   TruckerMarker({
     required this.id,
@@ -33,6 +36,9 @@ class TruckerMarker {
     this.confirmations = 1,
     this.createdAt,
     this.updatedAt,
+    this.authorId,
+    this.authorName,
+    this.authorXp,
   });
 
   TruckerMarker copyWith({
@@ -44,6 +50,9 @@ class TruckerMarker {
     int? confirmations,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? authorId,
+    String? authorName,
+    int? authorXp,
   }) {
     return TruckerMarker(
       id: id ?? this.id,
@@ -54,6 +63,9 @@ class TruckerMarker {
       confirmations: confirmations ?? this.confirmations,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      authorId: authorId ?? this.authorId,
+      authorName: authorName ?? this.authorName,
+      authorXp: authorXp ?? this.authorXp,
     );
   }
 
@@ -69,6 +81,9 @@ class TruckerMarker {
     if (heading != null) map['heading'] = heading;
     if (createdAt != null) map['createdAt'] = createdAt!.toIso8601String();
     if (updatedAt != null) map['updatedAt'] = updatedAt!.toIso8601String();
+    if (authorId != null) map['authorId'] = authorId;
+    if (authorName != null) map['authorName'] = authorName;
+    if (authorXp != null) map['authorXp'] = authorXp;
     return map;
   }
 
@@ -91,6 +106,9 @@ class TruckerMarker {
       updatedAt: map['updatedAt'] != null
           ? DateTime.tryParse(map['updatedAt'] as String)
           : null,
+      authorId: map['authorId'] != null ? (map['authorId'] as num).toInt() : null,
+      authorName: map['authorName'] as String?,
+      authorXp: map['authorXp'] != null ? (map['authorXp'] as num).toInt() : null,
     );
   }
 }

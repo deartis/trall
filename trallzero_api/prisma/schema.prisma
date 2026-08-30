@@ -25,10 +25,15 @@ enum AlertType {
 
 model User {
   id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  name               String
+  email              String   @unique
+  password           String
+  // Pontuação e Reputação (Trucker Rank)
+  xp                 Int      @default(0)
+  reportsCount       Int      @default(0)
+  confirmationsCount Int      @default(0)
+  correctionsCount   Int      @default(0)
+  createdAt          DateTime @default(now())
 
   // Relacionamentos
   alerts      Alert[]

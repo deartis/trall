@@ -89,11 +89,24 @@ class ApiService {
         final List alerts = data['data'];
         
         return alerts.map((a) {
+          final user = a['user'] as Map<String, dynamic>?;
+          final count = a['_count'] as Map<String, dynamic>?;
+          final validationsCount = count != null && count['validations'] != null
+              ? (count['validations'] as num).toInt()
+              : 1;
+
           return TruckerMarker(
             id: a['id'].toString(),
-            position: LatLng(a['latitude'], a['longitude']),
+            position: LatLng(
+              (a['latitude'] as num).toDouble(),
+              (a['longitude'] as num).toDouble(),
+            ),
             type: _mapType(a['type']),
             description: a['description'] ?? '',
+            confirmations: validationsCount > 0 ? validationsCount : 1,
+            authorId: user != null ? (user['id'] as num?)?.toInt() : null,
+            authorName: user != null ? user['name'] as String? : null,
+            authorXp: user != null && user['xp'] != null ? (user['xp'] as num).toInt() : 0,
           );
         }).toList();
       }
@@ -122,7 +135,7 @@ class ApiService {
         }),
       );
 
-      if (response.statusCode == 201) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         return true;
       } else {
         debugPrint('Falha ao postar alerta. Código de status: ${response.statusCode}, Corpo: ${response.body}');
@@ -132,6 +145,59 @@ class ApiService {
       debugPrint('Erro ao postar alerta: $e');
       return false;
     }
+  }
+
+  /// Valida (confirma presença) de um alerta na API e acumula XP
+  Future<Map<String, dynamic>?> validateAlert(int alertId, {bool isHelpful = true}) async {
+    if (_userId == null) return null;
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/alerts/$alertId/validate'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': _userId,
+          'isHelpful': isHelpful,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        debugPrint('Falha ao validar alerta: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Erro ao validar alerta na API: $e');
+    }
+    return null;
+  }
+
+  /// Busca o perfil atualizado do motorista (XP, patentes, contadores)
+  Future<Map<String, dynamic>?> fetchUserProfile(int userId) async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/users/$userId'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['data'] as Map<String, dynamic>?;
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar perfil na API: $e');
+    }
+    return null;
+  }
+
+  /// Busca o ranking comunitário dos melhores motoristas
+  Future<List<Map<String, dynamic>>> fetchRanking() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/users/ranking'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List list = data['data'] ?? [];
+        return list.cast<Map<String, dynamic>>();
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar ranking na API: $e');
+    }
+    return [];
   }
 
   Future<bool> deleteAlert(String id) async {

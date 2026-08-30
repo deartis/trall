@@ -30,19 +30,21 @@ class TrallBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tc = context.watch<TruckController>();
-    final isNavigating = tc.isNavigating;
+    final hideBar = tc.isNavigating || tc.routePoints.isNotEmpty;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    return AnimatedSlide(
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeInOutCubic,
-      offset: isNavigating ? const Offset(0, 1.5) : Offset.zero,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 250),
-        opacity: isNavigating ? 0.0 : 1.0,
-        child: Container(
-          padding: EdgeInsets.fromLTRB(12, 10, 12, safeBottom + 10),
-          decoration: BoxDecoration(
+    return IgnorePointer(
+      ignoring: hideBar,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeInOutCubic,
+        offset: hideBar ? const Offset(0, 1.5) : Offset.zero,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 250),
+          opacity: hideBar ? 0.0 : 1.0,
+          child: Container(
+            padding: EdgeInsets.fromLTRB(12, 10, 12, safeBottom + 10),
+            decoration: BoxDecoration(
             color: AppColors.bgPanel,
             border: Border(
               top: BorderSide(
@@ -77,8 +79,9 @@ class TrallBottomNav extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _TabData {

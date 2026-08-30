@@ -142,16 +142,22 @@ class _NavigationPanelState extends State<NavigationPanel> {
     final tc = context.watch<TruckController>();
     final isNavigating = tc.isNavigating;
 
+    final screenH = MediaQuery.of(context).size.height;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+    final effectiveSnapPeek = isNavigating
+        ? ((125.0 + safeBottom) / screenH).clamp(0.14, 0.22)
+        : _snapPeek;
+
     // Em modo navegando, trava no peek — menos clutter
-    final initialSize = isNavigating ? _snapPeek : _snapMid;
+    final initialSize = isNavigating ? effectiveSnapPeek : _snapMid;
     final snapSizes = isNavigating
-        ? [_snapPeek, _snapMid]
-        : [_snapPeek, _snapMid, _snapMax];
+        ? [effectiveSnapPeek, _snapMid]
+        : [effectiveSnapPeek, _snapMid, _snapMax];
 
     return DraggableScrollableSheet(
       controller: _sheetController,
       initialChildSize: initialSize,
-      minChildSize: _snapPeek,
+      minChildSize: effectiveSnapPeek,
       maxChildSize: isNavigating ? _snapMid : _snapMax,
       snap: true,
       snapSizes: snapSizes,
@@ -816,9 +822,10 @@ class _NavigatingPeek extends StatelessWidget {
         : 'Continue em frente';
     final streetName = step?.streetName ?? '';
     final distanceText = tc.formattedDistanceToNextStep;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      padding: EdgeInsets.fromLTRB(16, 6, 16, safeBottom > 0 ? safeBottom : 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

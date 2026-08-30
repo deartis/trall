@@ -4,10 +4,215 @@ import '../services/auth_service.dart';
 import '../controllers/truck_controller.dart';
 import '../models/truck_profile.dart';
 import '../services/user_score_service.dart';
-
+import '../models/user_rank.dart';
+import '../services/api_service.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
+
+  void _showRankingSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF111318),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.65,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (_, scrollController) {
+            return FutureBuilder<List<Map<String, dynamic>>>(
+              future: ApiService.instance.fetchRanking(),
+              builder: (context, snapshot) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.emoji_events_rounded,
+                              color: Color(0xFFFFD700),
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Ranking dos Caminhoneiros',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              Text(
+                                'Os motoristas mais colaborativos da estrada',
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(color: Colors.white10, height: 1),
+                      Expanded(
+                        child: snapshot.connectionState == ConnectionState.waiting
+                            ? const Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFFFD700),
+                                ),
+                              )
+                            : (snapshot.data == null || snapshot.data!.isEmpty)
+                                ? const Center(
+                                    child: Text(
+                                      'Nenhum motorista ranqueado ainda.',
+                                      style: TextStyle(color: Colors.white54),
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    controller: scrollController,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    itemCount: snapshot.data!.length,
+                                    separatorBuilder: (context, index) =>
+                                        const Divider(color: Colors.white10, height: 1),
+                                    itemBuilder: (context, index) {
+                                      final item = snapshot.data![index];
+                                      final userXp = (item['xp'] as num?)?.toInt() ?? 0;
+                                      final userRank = UserRank.getRank(userXp);
+                                      final pos = index + 1;
+                                      Color posColor;
+                                      String posBadge;
+                                      if (pos == 1) {
+                                        posColor = const Color(0xFFFFD700);
+                                        posBadge = '🥇';
+                                      } else if (pos == 2) {
+                                        posColor = const Color(0xFFC0C0C0);
+                                        posBadge = '🥈';
+                                      } else if (pos == 3) {
+                                        posColor = const Color(0xFFCD7F32);
+                                        posBadge = '🥉';
+                                      } else {
+                                        posColor = Colors.white54;
+                                        posBadge = '#$pos';
+                                      }
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        child: Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 32,
+                                              child: Center(
+                                                child: Text(
+                                                  posBadge,
+                                                  style: TextStyle(
+                                                    color: posColor,
+                                                    fontSize: pos <= 3 ? 18 : 13,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            CircleAvatar(
+                                              radius: 18,
+                                              backgroundColor: userRank.color.withValues(alpha: 0.2),
+                                              child: Text(
+                                                (item['name'] as String? ?? 'M')
+                                                    .substring(0, 1)
+                                                    .toUpperCase(),
+                                                style: TextStyle(
+                                                  color: userRank.color,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    item['name'] as String? ?? 'Motorista',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 14,
+                                                      fontWeight: FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  Row(
+                                                    children: [
+                                                      Text(
+                                                        '${userRank.emoji} ${userRank.title}',
+                                                        style: TextStyle(
+                                                          color: userRank.color,
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Text(
+                                                        '• ${item['reportsCount'] ?? 0} alertas',
+                                                        style: const TextStyle(
+                                                          color: Colors.white38,
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Text(
+                                              '$userXp XP',
+                                              style: TextStyle(
+                                                color: userRank.color,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
 
   Future<void> _confirmSignOut(BuildContext context) async {
     final auth = context.read<AuthService>();
@@ -466,6 +671,34 @@ class ProfileScreen extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showRankingSheet(context),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFFFD700),
+                            side: BorderSide(
+                              color: const Color(0xFFFFD700).withValues(alpha: 0.35),
+                              width: 1.2,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            backgroundColor:
+                                const Color(0xFFFFD700).withValues(alpha: 0.05),
+                          ),
+                          icon: const Icon(Icons.leaderboard_rounded, size: 18),
+                          label: const Text(
+                            'Ver Ranking dos Caminhoneiros',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
