@@ -20,6 +20,7 @@ import '../services/poi_service.dart';
 
 import '../models/delivery_stop.dart';
 import '../widgets/recent_destinations.dart';
+import '../services/route_telemetry_service.dart';
 
 
 enum FatigueSeverity { none, warning, danger, critical }
@@ -90,6 +91,9 @@ class TruckController extends ChangeNotifier {
 
   double _distance = 0;
   double _duration = 0;
+  double _remainingDistance = 0;
+  double _remainingDuration = 0;
+  double _averageMovingSpeedKmh = 0;
 
   List<RoadSegmentAnalysis> _routeAnalysisSegments = [];
   List<RoadAnalysisFinding> _routeAnalysisFindings = [];
@@ -122,6 +126,10 @@ class TruckController extends ChangeNotifier {
   int get drivingSeconds => _drivingSeconds;
   bool get hasFatigueAlert => _isFatigueAlertTriggered;
 
+  double get remainingDistance => _isNavigating ? _remainingDistance : _distance;
+  double get remainingDuration => _isNavigating ? _remainingDuration : _duration;
+  double get averageMovingSpeedKmh => _averageMovingSpeedKmh;
+
   /// Nível de fadiga gradual baseado no tempo de direção contínua
   FatigueSeverity get fatigueSeverity {
     if (_drivingSeconds < 4 * 3600) return FatigueSeverity.none;       // < 4h
@@ -132,19 +140,16 @@ class TruckController extends ChangeNotifier {
 
   /// Distância percorrida na rota atual em metros (para a RouteRiskBar)
   double get progressOnRouteMeters {
-    if (_routePoints.isEmpty) return 0;
-    return (_distance * (_currentStepIndex / 
-        (_availableRoutes.isNotEmpty && _availableRoutes[_selectedRouteIndex].steps.isNotEmpty
-          ? _availableRoutes[_selectedRouteIndex].steps.length
-          : 1))).clamp(0.0, _distance);
+    if (_routePoints.isEmpty || _distance <= 0) return 0;
+    if (!_isNavigating) return 0;
+    return (_distance - _remainingDistance).clamp(0.0, _distance);
   }
 
   /// Fração do percurso concluído [0.0, 1.0] — usada pela barra de progresso no HUD.
   double get routeProgressFraction {
-    if (_availableRoutes.isEmpty) return 0.0;
-    final route = _availableRoutes[_selectedRouteIndex];
-    if (route.steps.isEmpty) return 0.0;
-    return (_currentStepIndex / route.steps.length).clamp(0.0, 1.0);
+    if (_distance <= 0) return 0.0;
+    if (!_isNavigating) return 0.0;
+    return ((_distance - _remainingDistance) / _distance).clamp(0.0, 1.0);
   }
 
 
@@ -192,22 +197,25 @@ class TruckController extends ChangeNotifier {
   }
 
   String get formattedDistance {
-    if (_distance >= 1000) return '${(_distance / 1000).toStringAsFixed(1)} km';
-    return '${_distance.toInt()} m';
+    final d = _isNavigating ? _remainingDistance : _distance;
+    if (d >= 1000) return '${(d / 1000).toStringAsFixed(1)} km';
+    return '${d.toInt()} m';
   }
 
   String get formattedDuration {
-    if (_duration >= 3600) {
-      int hours = (_duration / 3600).floor();
-      int minutes = ((_duration % 3600) / 60).floor();
+    final dur = _isNavigating ? _remainingDuration : _duration;
+    if (dur >= 3600) {
+      int hours = (dur / 3600).floor();
+      int minutes = ((dur % 3600) / 60).floor();
       return '${hours}h ${minutes}min';
     }
-    return '${(_duration / 60).floor()} min';
+    return '${(dur / 60).floor()} min';
   }
 
   String get formattedETA {
-    if (_duration <= 0) return '';
-    final arrival = DateTime.now().add(Duration(seconds: _duration.toInt()));
+    final dur = _isNavigating ? _remainingDuration : _duration;
+    if (dur <= 0) return '';
+    final arrival = DateTime.now().add(Duration(seconds: dur.toInt()));
     final h = arrival.hour.toString().padLeft(2, '0');
     final m = arrival.minute.toString().padLeft(2, '0');
     return 'Chega às $h:$m';
@@ -242,6 +250,15 @@ class TruckController extends ChangeNotifier {
     if (_isNavigating) {
       _currentStepIndex = 0;
       _resetStepVoiceAlertFlags();
+
+      // Inicializa a telemetria com a rota ativa
+      RouteTelemetryService.instance.initRoute(
+        points: _routePoints,
+        totalDistance: _distance,
+        totalDuration: _duration,
+      );
+      _remainingDistance = _distance;
+      _remainingDuration = _duration;
 
       // Restaura segundos de fadiga persistidos (caso o app tenha fechado
       // enquanto o motorista estava dirigindo).
@@ -284,6 +301,7 @@ class TruckController extends ChangeNotifier {
       // Inicia o serviço em segundo plano
       FlutterBackgroundService().startService();
     } else {
+      RouteTelemetryService.instance.reset();
       TtsService.instance.stop();
       _drivingTimer?.cancel();
 
@@ -319,8 +337,24 @@ class TruckController extends ChangeNotifier {
   /// Avança para o próximo step quando o motorista passa pela manobra
   /// e gerencia os alertas sonoros em tempo real com antecedência adequada.
   /// Chamado pelo MapScreen a cada update de GPS.
-  void updateCurrentStep(LatLng position, {double speed = 0.0}) {
+  void updateCurrentStep(
+    LatLng position, {
+    double speed = 0.0,
+    int? segmentIndex,
+  }) {
     _lastKnownUserPosition = position;
+
+    // Atualiza telemetria dinâmica de distância restante, duração e velocidade
+    if (_isNavigating && _routePoints.isNotEmpty) {
+      final telemetry = RouteTelemetryService.instance.update(
+        position: position,
+        speedMps: speed,
+        segmentIndex: segmentIndex,
+      );
+      _remainingDistance = telemetry.remainingDistanceMeters;
+      _remainingDuration = telemetry.remainingDurationSeconds;
+      _averageMovingSpeedKmh = telemetry.averageSpeedKmh;
+    }
 
     final route = _availableRoutes.isNotEmpty
         ? _availableRoutes[_selectedRouteIndex]
@@ -735,10 +769,18 @@ class TruckController extends ChangeNotifier {
     _routePoints = selected.points;
     _distance = selected.distance;
     _duration = selected.duration;
+    _remainingDistance = selected.distance;
+    _remainingDuration = selected.duration;
     _routeAnalysisSegments = selected.slopeSegments;
     _routeAnalysisFindings = selected.findings;
     _routeRiskLevel = selected.riskLevel;
     _currentStepIndex = 0;
+
+    RouteTelemetryService.instance.initRoute(
+      points: selected.points,
+      totalDistance: selected.distance,
+      totalDuration: selected.duration,
+    );
     
     notifyListeners();
   }
@@ -964,10 +1006,18 @@ class TruckController extends ChangeNotifier {
     final active = _availableRoutes[_selectedRouteIndex];
     _distance = active.distance;
     _duration = active.duration;
+    _remainingDistance = active.distance;
+    _remainingDuration = active.duration;
     _routePoints = active.points;
     _routeAnalysisSegments = active.slopeSegments;
     _routeAnalysisFindings = active.findings;
     _routeRiskLevel = active.riskLevel;
+
+    RouteTelemetryService.instance.initRoute(
+      points: active.points,
+      totalDistance: active.distance,
+      totalDuration: active.duration,
+    );
   }
 
   void selectRoute(int index) {
@@ -991,6 +1041,9 @@ class TruckController extends ChangeNotifier {
     _routeRiskLevel = RoadHazardLevel.safe;
     _distance = 0;
     _duration = 0;
+    _remainingDistance = 0;
+    _remainingDuration = 0;
+    _averageMovingSpeedKmh = 0;
     _suggestions = [];
     _isNavigating = false;
     _availableRoutes = [];
@@ -1000,6 +1053,7 @@ class TruckController extends ChangeNotifier {
     _drivingSeconds = 0;
     _fatigueStartedAt = null;
     _isFatigueAlertTriggered = false;
+    RouteTelemetryService.instance.reset();
     // Desliga o serviço em segundo plano
     FlutterBackgroundService().invoke('stopService');
     // Limpa o estado persistido ao encerrar a rota conscientemente

@@ -262,19 +262,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           truckController.routePoints.isNotEmpty) {
         // Projeção no SEGMENTO mais próximo (em vez de vértice mais próximo).
         // Isso garante movimento suave em curvas, eliminando o efeito de parar/pular.
-        final snapResult = _snapToRouteSegment(
+        final (snappedPos, minDist, segmentIndex) = _snapToRouteSegment(
           rawPos,
           truckController.routePoints,
         );
-        final minDist = snapResult.$2;
         const double snappingThreshold = 35.0;
 
         if (minDist < snappingThreshold) {
-          newPos = snapResult.$1;
+          newPos = snappedPos;
           _offRouteCount = 0;
           truckController.updateCurrentStep(
             newPos,
             speed: speed,
+            segmentIndex: segmentIndex,
           ); // avança manobra e gerencia alertas de voz
         } else {
           if (position.accuracy <= 20.0) {
@@ -647,11 +647,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   }
 
   /// Projeta [rawPos] no segmento de rota mais próximo e retorna
-  /// (posição projetada, distância ao segmento em metros).
+  /// (posição projetada, distância ao segmento em metros, índice do segmento).
   /// Produz movimento suave mesmo em curvas porque interpola entre vértices.
-  (LatLng, double) _snapToRouteSegment(LatLng rawPos, List<LatLng> route) {
+  (LatLng, double, int) _snapToRouteSegment(LatLng rawPos, List<LatLng> route) {
     LatLng bestProjection = route.first;
     double bestDist = double.infinity;
+    int bestSegmentIndex = 0;
 
     for (int i = 0; i < route.length - 1; i++) {
       final a = route[i];
@@ -683,10 +684,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       if (d < bestDist) {
         bestDist = d;
         bestProjection = proj;
+        bestSegmentIndex = i;
       }
     }
 
-    return (bestProjection, bestDist);
+    return (bestProjection, bestDist, bestSegmentIndex);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
