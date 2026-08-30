@@ -35,7 +35,7 @@ class PoiService {
         final data = json.decode(response.body);
         final elements = data['elements'] as List<dynamic>;
         
-        debugPrint('POI Service: Retornou \${elements.length} elementos do Overpass.');
+        debugPrint('POI Service: Retornou ${elements.length} elementos do Overpass.');
 
         final List<TruckerMarker> markers = [];
         for (var element in elements) {
@@ -93,6 +93,79 @@ class PoiService {
     } catch (e, stacktrace) {
       debugPrint('Exceção ao buscar POIs: $e');
       debugPrint('Stacktrace: $stacktrace');
+      return null;
+    }
+  }
+
+  static Future<List<TruckerMarker>?> fetchPOIsByType(LatLng center, MarkerType type, {double radius = 5000}) async {
+    final lat = center.latitude;
+    final lon = center.longitude;
+    String filter = '';
+
+    switch (type) {
+      case MarkerType.gasStation:
+        filter = 'nwr["amenity"="fuel"](around:$radius,$lat,$lon);';
+        break;
+      case MarkerType.mechanic:
+        filter = 'nwr["shop"="car_repair"](around:$radius,$lat,$lon);';
+        break;
+      case MarkerType.restaurant:
+        filter = 'nwr["amenity"="restaurant"](around:$radius,$lat,$lon);';
+        break;
+      default:
+        return [];
+    }
+
+    final query = '''
+      [out:json][timeout:25];
+      (
+        $filter
+      );
+      out center tags;
+    ''';
+
+    try {
+      final response = await http.post(
+        Uri.parse(_overpassUrl),
+        headers: {'User-Agent': 'TrallZeroApp'},
+        body: {'data': query},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final elements = data['elements'] as List<dynamic>;
+        
+        final List<TruckerMarker> markers = [];
+        for (var element in elements) {
+          double? elementLat;
+          double? elementLon;
+
+          if (element['type'] == 'node') {
+            elementLat = (element['lat'] as num?)?.toDouble();
+            elementLon = (element['lon'] as num?)?.toDouble();
+          } else if (element['center'] != null) {
+            elementLat = (element['center']['lat'] as num?)?.toDouble();
+            elementLon = (element['center']['lon'] as num?)?.toDouble();
+          }
+
+          if (elementLat == null || elementLon == null) continue;
+
+          final tags = element['tags'] as Map<String, dynamic>? ?? {};
+          String description = tags['name'] ?? 'Ponto de Interesse';
+          if (tags['brand'] != null) description += ' - ${tags['brand']}';
+
+          markers.add(TruckerMarker(
+            id: 'osm_${element['id']}',
+            position: LatLng(elementLat, elementLon),
+            type: type,
+            description: description,
+          ));
+        }
+        return markers;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Exceção ao buscar POIs por tipo: $e');
       return null;
     }
   }

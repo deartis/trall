@@ -1,14 +1,26 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 
+/// Callback executado em um isolado próprio quando o usuário toca em uma
+/// ação da notificação com o app fechado/em background.
+///
+/// Os actions usam [AndroidNotificationAction.showsUserInterface] = false
+/// justamente para serem roteados SEMPRE para cá (e não para a Activity),
+/// garantindo funcionamento mesmo com o app totalmente encerrado.
 @pragma('vm:entry-point')
-void onNotificationTapBackground(NotificationResponse notificationResponse) async {
-  WidgetsFlutterBinding.ensureInitialized();
-  if (notificationResponse.actionId == 'stop_navigation' || notificationResponse.id == 888) {
-    FlutterBackgroundService().invoke('stopService');
+Future<void> onNotificationTapBackground(NotificationResponse notificationResponse) async {
+  final service = FlutterBackgroundService();
+  switch (notificationResponse.actionId) {
+    case 'stop_navigation':
+      service.invoke('stopService');
+      break;
+    case 'kill_app':
+      service.invoke('killService');
+      break;
   }
 }
 
@@ -48,15 +60,11 @@ class BackgroundNavigationService {
 
     await flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        if (response.actionId == 'stop_navigation' || response.id == 888) {
-          service.invoke('stopService');
-        }
-      },
+      onDidReceiveNotificationResponse: _handleNotificationResponse,
       onDidReceiveBackgroundNotificationResponse: onNotificationTapBackground,
     );
 
-    // Função auxiliar para atualizar a notificação com o botão "PARAR"
+    // Função auxiliar para atualizar a notificação com os botões de controle
     void showCustomNotification({String? title, String? content}) {
       flutterLocalNotificationsPlugin.show(
         888,
@@ -76,8 +84,12 @@ class BackgroundNavigationService {
               AndroidNotificationAction(
                 'stop_navigation',
                 'PARAR NAVEGAÇÃO',
-                cancelNotification: true,
-                showsUserInterface: true,
+                showsUserInterface: false,
+              ),
+              AndroidNotificationAction(
+                'kill_app',
+                'FECHAR APP',
+                showsUserInterface: false,
               ),
             ],
           ),
@@ -123,18 +135,52 @@ class BackgroundNavigationService {
       debugPrint('Erro no GPS background: $err');
     });
 
-    // Listener único para parar o serviço:
-    // cancela o GPS stream, remove a notificação e mata o serviço.
-    service.on('stopService').listen((event) async {
-      await positionSubscription?.cancel();
+    Future<void> teardownNotifications() async {
       try {
         await flutterLocalNotificationsPlugin.cancel(888);
         await flutterLocalNotificationsPlugin.cancelAll();
       } catch (_) {}
+    }
+
+    // Para a navegação em segundo plano (o app continua aberto se estiver).
+    service.on('stopService').listen((event) async {
+      await positionSubscription?.cancel();
+      await teardownNotifications();
       if (service is AndroidServiceInstance) {
         service.setAsBackgroundService();
       }
       service.stopSelf();
     });
+
+    // Encerra a aplicação por completo a partir da notificação:
+    // cancela GPS e notificações, remove o serviço foreground e mata o processo.
+    service.on('killService').listen((event) async {
+      debugPrint('[BgNav] killService: encerrando aplicação...');
+      await positionSubscription?.cancel();
+      await teardownNotifications();
+      try {
+        if (service is AndroidServiceInstance) {
+          await service.setAsBackgroundService();
+        }
+        service.stopSelf();
+      } catch (_) {}
+      // Dá tempo para o sistema processar stopSelf/remoção da notificação
+      // antes de matar o processo inteiro (UI incluída).
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      exit(0);
+    });
+  }
+
+  /// Handler das ações quando o app está aberto (isolado principal).
+  static void _handleNotificationResponse(NotificationResponse response) {
+    final service = FlutterBackgroundService();
+    switch (response.actionId) {
+      case 'stop_navigation':
+        service.invoke('stopService');
+        break;
+      case 'kill_app':
+        service.invoke('killService');
+        break;
+    }
   }
 }

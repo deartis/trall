@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../controllers/truck_controller.dart';
 import '../models/truck_profile.dart';
+import '../services/user_score_service.dart';
 
 
 class ProfileScreen extends StatelessWidget {
@@ -132,8 +133,8 @@ class ProfileScreen extends StatelessWidget {
     final isSignedIn = auth.isSignedIn;
     final user = auth.currentUser;
     final currentProfile = tc.truckProfile;
-
-    // Gamificação — placeholder (sem variáveis desnecessárias)
+    final scoreService = context.watch<UserScoreService>();
+    final rank = scoreService.currentRank;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0E17),
@@ -238,7 +239,7 @@ class ProfileScreen extends StatelessWidget {
                               width: 28,
                               height: 28,
                               decoration: BoxDecoration(
-                                color: const Color(0xFFE07B1A),
+                                color: rank.color,
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color: const Color(0xFF0E1320),
@@ -246,8 +247,7 @@ class ProfileScreen extends StatelessWidget {
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: const Color(0xFFE07B1A)
-                                        .withValues(alpha: 0.5),
+                                    color: rank.color.withValues(alpha: 0.5),
                                     blurRadius: 8,
                                     offset: const Offset(0, 2),
                                   ),
@@ -255,9 +255,9 @@ class ProfileScreen extends StatelessWidget {
                               ),
                               child: Center(
                                 child: Text(
-                                  '1',
+                                  '${rank.level}',
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.black,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w900,
                                   ),
@@ -296,16 +296,16 @@ class ProfileScreen extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE07B1A).withValues(alpha: 0.12),
+                            color: rank.color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: const Color(0xFFE07B1A).withValues(alpha: 0.3),
+                              color: rank.color.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Text(
-                            '⭐  Motorista',
-                            style: const TextStyle(
-                              color: Color(0xFFE07B1A),
+                            '${rank.emoji}  ${rank.title}',
+                            style: TextStyle(
+                              color: rank.color,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                             ),
@@ -325,66 +325,147 @@ class ProfileScreen extends StatelessWidget {
             sliver: SliverList(
               delegate: SliverChildListDelegate([
 
-                // ── Card de XP (Em breve) ───────────────────────────────────
+                // ── Card de XP e Reputação Rodoviária ───────────────────────────
                 _SectionCard(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE07B1A).withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.emoji_events_outlined,
-                          color: Color(0xFFE07B1A),
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Sistema de Progresso',
+                      Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: rank.color.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: rank.color.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.emoji_events_rounded,
+                              color: rank.color,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${rank.emoji} ${rank.title} (Nível ${rank.level})',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '${scoreService.xp} XP acumulados na estrada',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: rank.color.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: rank.color.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Text(
+                              'RANK #${rank.level}',
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
+                                color: rank.color,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      // Barra de Progresso
+                      Row(
+                        children: [
+                          Text(
+                            rank.nextRank != null
+                                ? 'Próxima: ${rank.nextRank!.emoji} ${rank.nextRank!.title}'
+                                : '👑 Patente Máxima',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (rank.nextRank != null)
+                            Text(
+                              'Faltam ${rank.getRemainingXp(scoreService.xp)} XP',
+                              style: TextStyle(
+                                color: rank.color,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            const SizedBox(height: 3),
-                            Text(
-                              'Em breve — ganhe XP e suba de nível ao usar o Trall.',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.35),
-                                fontSize: 11,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: rank.getProgress(scoreService.xp),
+                          backgroundColor: Colors.white10,
+                          valueColor: AlwaysStoppedAnimation<Color>(rank.color),
+                          minHeight: 8,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE07B1A).withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFFE07B1A).withValues(alpha: 0.25),
+                      const SizedBox(height: 16),
+                      const Divider(color: Colors.white10, height: 1),
+                      const SizedBox(height: 14),
+                      // Breakdown de colaborações
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildStatItem(
+                              icon: Icons.add_location_alt_rounded,
+                              color: const Color(0xFF34C759),
+                              label: 'Alertas',
+                              value: '${scoreService.reportsCount}',
+                              sublabel: '+${scoreService.reportsCount * UserScoreService.xpForNewReport} XP',
+                            ),
                           ),
-                        ),
-                        child: const Text(
-                          'EM BREVE',
-                          style: TextStyle(
-                            color: Color(0xFFE07B1A),
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.0,
+                          Container(width: 1, height: 36, color: Colors.white10),
+                          Expanded(
+                            child: _buildStatItem(
+                              icon: Icons.thumb_up_rounded,
+                              color: const Color(0xFF2563EB),
+                              label: 'Validações',
+                              value: '${scoreService.confirmationsCount}',
+                              sublabel: '+${scoreService.confirmationsCount * UserScoreService.xpForConfirmation} XP',
+                            ),
                           ),
-                        ),
+                          Container(width: 1, height: 36, color: Colors.white10),
+                          Expanded(
+                            child: _buildStatItem(
+                              icon: Icons.sync_rounded,
+                              color: const Color(0xFFFF9500),
+                              label: 'Correções',
+                              value: '${scoreService.correctionsCount}',
+                              sublabel: '+${scoreService.correctionsCount * UserScoreService.xpForCorrection} XP',
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -630,6 +711,47 @@ class ProfileScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  static Widget _buildStatItem({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required String value,
+    required String sublabel,
+  }) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          sublabel,
+          style: TextStyle(
+            color: color.withValues(alpha: 0.8),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }

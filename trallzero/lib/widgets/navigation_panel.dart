@@ -228,7 +228,8 @@ class _NavigationPanelState extends State<NavigationPanel> {
                   onStop: widget.onStop,
                 ),
 
-
+                // ── Truck Info Strip — dados do veículo na faixa de navegação ──
+                _TruckInfoStrip(tc: tc),
 
                 // Quick-Add marker
                 if (widget.onAddMarkerAtCurrentPosition != null) ...[
@@ -855,12 +856,12 @@ class _NavigatingPeek extends StatelessWidget {
                       letterSpacing: 0.5,
                     ),
                   ),
-                // Instrução da manobra
+                // Instrução da manobra — maior para visibilidade em movimento
                 Text(
                   instruction,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 15,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     height: 1.1,
                   ),
@@ -1166,6 +1167,98 @@ class _EndRouteButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Faixa de informações do veículo (peso, altura, eixos, pedágio)
+// ─────────────────────────────────────────────────────────────────────────────
+class _TruckInfoStrip extends StatelessWidget {
+  const _TruckInfoStrip({required this.tc});
+  final TruckController tc;
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = tc.truckProfile;
+    final weightT = (profile.maxWeightKg / 1000).toStringAsFixed(0);
+    final heightM = profile.maxHeightMeters.toStringAsFixed(1);
+    final axles = profile.axles;
+    final avoidTolls = tc.avoidTolls;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.07),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _InfoChip(
+              icon: Icons.scale_rounded,
+              label: '${weightT}t',
+              color: Colors.white.withValues(alpha: 0.70),
+            ),
+            _InfoChip(
+              icon: Icons.height_rounded,
+              label: '${heightM}m',
+              color: Colors.white.withValues(alpha: 0.70),
+            ),
+            _InfoChip(
+              icon: Icons.toll_rounded,
+              label: '$axles eixos',
+              color: Colors.white.withValues(alpha: 0.70),
+            ),
+            _InfoChip(
+              icon: avoidTolls
+                  ? Icons.money_off_rounded
+                  : Icons.paid_rounded,
+              label: avoidTolls ? 'Sem pedágio' : 'Com pedágio',
+              color: avoidTolls
+                  ? const Color(0xFF34C759)
+                  : Colors.white.withValues(alpha: 0.45),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ],
     );
   }
 }

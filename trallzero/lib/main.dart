@@ -12,6 +12,7 @@ import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/truck_profile_service.dart';
 import 'services/background_navigation_service.dart';
+import 'services/user_score_service.dart';
 import 'models/truck_profile.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
@@ -19,6 +20,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await PreferencesService.instance.init();
+  await UserScoreService.instance.init();
   await ApiService.instance.init();
   await AuthService.instance.tryRestoreSession();
   await BackgroundNavigationService.initialize();
@@ -35,6 +37,7 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => TruckController()),
         ChangeNotifierProvider(create: (_) => PreferencesService.instance),
+        ChangeNotifierProvider(create: (_) => UserScoreService.instance),
         ChangeNotifierProvider(create: (_) => AuthService.instance),
       ],
       child: const MyApp(),

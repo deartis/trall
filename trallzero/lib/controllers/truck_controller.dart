@@ -24,6 +24,15 @@ import '../widgets/recent_destinations.dart';
 
 enum FatigueSeverity { none, warning, danger, critical }
 
+/// Nível de precisão do último endereço geocodificado.
+enum GeocodePrecision {
+  /// Número predial localizado (ou busca sem número, ex.: rua/ponto de interesse).
+  exact,
+
+  /// Apenas um ponto aproximado na via — o número não foi encontrado nos dados.
+  approximate,
+}
+
 
 class TruckController extends ChangeNotifier {
   List<DeliveryStop> _deliveryStops = [];
@@ -87,6 +96,7 @@ class TruckController extends ChangeNotifier {
   RoadHazardLevel _routeRiskLevel = RoadHazardLevel.safe;
 
   List<String> _suggestions = [];
+  GeocodePrecision _lastSearchPrecision = GeocodePrecision.exact;
 
   List<DeliveryStop> get deliveryStops => _deliveryStops;
   LatLng? get destination => _deliveryStops.isNotEmpty ? LatLng(_deliveryStops.last.lat, _deliveryStops.last.lng) : null;
@@ -97,6 +107,7 @@ class TruckController extends ChangeNotifier {
   bool get isRouting => _isRouting;
   bool get isNavigating => _isNavigating;
   List<String> get suggestions => _suggestions;
+  GeocodePrecision get lastSearchPrecision => _lastSearchPrecision;
   List<RoadSegmentAnalysis> get routeAnalysisSegments => _routeAnalysisSegments;
   List<RoadAnalysisFinding> get routeAnalysisFindings => _routeAnalysisFindings;
   RoadHazardLevel get routeRiskLevel => _routeRiskLevel;
@@ -126,6 +137,14 @@ class TruckController extends ChangeNotifier {
         (_availableRoutes.isNotEmpty && _availableRoutes[_selectedRouteIndex].steps.isNotEmpty
           ? _availableRoutes[_selectedRouteIndex].steps.length
           : 1))).clamp(0.0, _distance);
+  }
+
+  /// Fração do percurso concluído [0.0, 1.0] — usada pela barra de progresso no HUD.
+  double get routeProgressFraction {
+    if (_availableRoutes.isEmpty) return 0.0;
+    final route = _availableRoutes[_selectedRouteIndex];
+    if (route.steps.isEmpty) return 0.0;
+    return (_currentStepIndex / route.steps.length).clamp(0.0, 1.0);
   }
 
 
@@ -233,9 +252,25 @@ class TruckController extends ChangeNotifier {
       final step = nextStep;
       if (step != null) {
         final distMeters = distanceToNextStepMeters?.toInt() ?? step.distance.toInt();
+        final totalDistMeters = _distance.toInt();
         final street = step.streetName.isNotEmpty ? ' na ${step.streetName}' : '';
-        TtsService.instance.speak(
-            'Navegação iniciada. Em $distMeters metros, ${step.translatedManeuver}$street');
+
+        if (step.type == 'arrive' || distMeters <= 20) {
+          final distStr = totalDistMeters >= 1000
+              ? '${(totalDistMeters / 1000).toStringAsFixed(1)} quilômetros'
+              : '$totalDistMeters metros';
+          TtsService.instance.speak(
+            'Navegação iniciada. Siga em frente por $distStr até o seu destino$street.',
+          );
+        } else {
+          final distStr = distMeters >= 1000
+              ? '${(distMeters / 1000).toStringAsFixed(1)} quilômetros'
+              : '$distMeters metros';
+          TtsService.instance.speak(
+            'Navegação iniciada. Em $distStr, ${step.translatedManeuver}$street.',
+          );
+        }
+
         if (distMeters <= 500) _hasSpoken500mAlert = true;
         if (distMeters <= 200) _hasSpoken200mAlert = true;
       } else {
@@ -428,15 +463,37 @@ class TruckController extends ChangeNotifier {
   /// Geocodifica [address] e configura como destino com precisão de número predial.
   ///
   /// Fluxo de alta precisão:
-  ///   1. Se for CEP → ViaCEP + geocode direto
-  ///   2. Nominatim v2 com addressdetails=1 e busca estruturada por número de casa
-  ///   3. Photon API da Komoot (otimizado para números de edifícios do OSM)
-  ///   4. Native geocoding package (fallback final)
+  ///   1. Se for CEP → ViaCEP + geocode direto (precisão aproximada)
+  ///   2. Nominatim v2 → resultado com house_number compatível = exato
+  ///   3. Geocoder nativo (Google/Apple) → interpola o número na via,
+  ///      mesmo quando o OSM não tem o número mapeado
+  ///   4. Photon API → fallback OSM com house_number
+  ///   5. Ponto aproximado na rua (quando nada encontrou o número)
+  ///
+  /// Após a busca, [lastSearchPrecision] indica se o ponto é exato ou
+  /// aproximado, permitindo avisar o motorista na interface.
   Future<LatLng?> searchAddress(String address, LatLng userLocation) async {
+    LatLng? streetFallback; // melhor ponto aproximado de rua encontrado
     try {
       _isRouting = true;
       _suggestions = [];
       notifyListeners();
+
+      const dist = Distance();
+
+      Future<void> finish(
+        LatLng point,
+        GeocodePrecision precision, {
+        String? recentLabel,
+      }) async {
+        _lastSearchPrecision = precision;
+        if (precision == GeocodePrecision.approximate) {
+          TtsService.instance.speak(
+              'Atenção. Não encontrei o número exato. O destino está marcado em um ponto aproximado da via.');
+        }
+        await setDestination(point, userLocation);
+        await RecentDestinations.saveDestination(recentLabel ?? address);
+      }
 
       // ── 1. Tentativa via CEP ───────────────────────────────────
       if (CepService.isCep(address)) {
@@ -444,25 +501,30 @@ class TruckController extends ChangeNotifier {
         if (cepResult != null) {
           final coords = await CepService.geocode(cepResult);
           if (coords != null) {
-            await setDestination(coords, userLocation);
-            await RecentDestinations.saveDestination(
-                '${address.replaceAll(RegExp(r'[^\d]'), '').replaceRange(5, 8, '-')} — ${cepResult.shortAddress}');
+            // CEP centra no trecho do logradouro, não no número
+            final label =
+                '${address.replaceAll(RegExp(r'[^\d]'), '').replaceRange(5, 8, '-')} — ${cepResult.shortAddress}';
+            await finish(coords, GeocodePrecision.approximate, recentLabel: label);
             return coords;
           }
         }
       }
 
-      // ── 2. Nominatim v2 com precisão de número de casa e viewbox ───────
+      final expectedNumber = extractHouseNumber(address);
+
+      // ── 2. Nominatim: casa exata tem prioridade; rua fica de reserva ───
       try {
         final encoded = Uri.encodeComponent(address);
         final lat = userLocation.latitude;
         final lon = userLocation.longitude;
         const offset = 1.0;
-        final viewBox = '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
-        
+        final viewBox =
+            '${lon - offset},${lat + offset},${lon + offset},${lat - offset}';
+
         final uri = Uri.parse(
           'https://nominatim.openstreetmap.org/search'
-          '?q=$encoded&format=jsonv2&addressdetails=1&limit=5&countrycodes=br&viewbox=$viewBox',
+          '?q=$encoded&format=jsonv2&addressdetails=1&limit=8&countrycodes=br'
+          '&accept-language=pt-BR&viewbox=$viewBox',
         );
         final response = await http
             .get(uri, headers: {'User-Agent': 'TrallApp/1.0'})
@@ -470,77 +532,134 @@ class TruckController extends ChangeNotifier {
 
         if (response.statusCode == 200) {
           final List data = json.decode(response.body);
-          if (data.isNotEmpty) {
-            // Procura se há um resultado com número de casa exato
-            Map<String, dynamic>? selectedItem;
-            for (final item in data) {
-              final addr = item['address'] as Map<String, dynamic>?;
-              if (addr != null && addr.containsKey('house_number')) {
-                selectedItem = item as Map<String, dynamic>;
-                break;
-              }
-            }
-            selectedItem ??= data.first as Map<String, dynamic>;
+          LatLng? exactPoint;
+          double bestExactDist = double.infinity;
 
-            final resLat = double.tryParse(selectedItem['lat'] as String? ?? '');
-            final resLon = double.tryParse(selectedItem['lon'] as String? ?? '');
-            if (resLat != null && resLon != null) {
-              final point = LatLng(resLat, resLon);
-              await setDestination(point, userLocation);
-              await RecentDestinations.saveDestination(address);
-              return point;
+          for (final item in data) {
+            final rLat = double.tryParse('${item['lat']}');
+            final rLon = double.tryParse('${item['lon']}');
+            if (rLat == null || rLon == null) continue;
+            final p = LatLng(rLat, rLon);
+            final addr = item['address'] as Map<String, dynamic>?;
+            final hn =
+                addr?['house_number']?.toString().replaceAll(RegExp(r'\D'), '');
+            final d = dist.distance(userLocation, p);
+
+            final isExactMatch = hn != null &&
+                hn.isNotEmpty &&
+                hn != '0' &&
+                (expectedNumber == null || hn == expectedNumber);
+
+            if (isExactMatch && d < bestExactDist) {
+              bestExactDist = d;
+              exactPoint = p;
+            } else if (!isExactMatch && streetFallback == null) {
+              streetFallback = p;
             }
+          }
+
+          if (exactPoint != null) {
+            await finish(exactPoint, GeocodePrecision.exact);
+            return exactPoint;
           }
         }
       } catch (e) {
         debugPrint('[Search] Nominatim falhou: $e');
       }
 
-      // ── 3. Fallback: Photon API (Geocoding de alta precisão OSM) ───────
+      // ── 3. Geocoder nativo: interpola números mesmo fora do OSM ───────
+      final nativePoint = await _nativeGeocode(address);
+      if (nativePoint != null) {
+        // Confia no nativo quando concorda com a rua candidata, quando não
+        // há candidato ou quando nenhuma casa foi digitada. Desacordo muito
+        // grande sugere cidade errada — nesse caso mantém o ponto local.
+        final agrees = expectedNumber == null ||
+            streetFallback == null ||
+            dist.distance(nativePoint, streetFallback) <= 30000;
+        if (agrees) {
+          await finish(nativePoint, GeocodePrecision.exact);
+          return nativePoint;
+        }
+        debugPrint('[Search] Nativo diverge do candidato OSM; usando ponto local.');
+      }
+
+      // ── 4. Fallback: Photon API (Geocoding de alta precisão OSM) ───────
       try {
         final encoded = Uri.encodeComponent(address);
         final uri = Uri.parse(
-          'https://photon.komoot.io/api/?q=$encoded&lat=${userLocation.latitude}&lon=${userLocation.longitude}&limit=5',
+          'https://photon.komoot.io/api/?q=$encoded&lat=${userLocation.latitude}&lon=${userLocation.longitude}&limit=5&lang=pt',
         );
         final response = await http.get(uri).timeout(_httpTimeout);
         if (response.statusCode == 200) {
           final data = json.decode(response.body) as Map<String, dynamic>;
           final features = data['features'] as List<dynamic>? ?? [];
-          if (features.isNotEmpty) {
-            Map<String, dynamic>? selectedFeature;
-            for (final feat in features) {
-              final props = feat['properties'] as Map<String, dynamic>?;
-              if (props != null && props.containsKey('housenumber')) {
-                selectedFeature = feat as Map<String, dynamic>;
-                break;
-              }
+
+          Map<String, dynamic>? exactFeature;
+          for (final feat in features) {
+            final props = feat['properties'] as Map<String, dynamic>?;
+            final hn = props?['housenumber']
+                ?.toString()
+                .replaceAll(RegExp(r'\D'), '');
+            if (hn != null &&
+                hn.isNotEmpty &&
+                (expectedNumber == null || hn == expectedNumber)) {
+              exactFeature = feat as Map<String, dynamic>;
+              break;
             }
-            selectedFeature ??= features.first as Map<String, dynamic>;
-            final coords = selectedFeature['geometry']['coordinates'] as List<dynamic>;
-            final point = LatLng((coords[1] as num).toDouble(), (coords[0] as num).toDouble());
-            await setDestination(point, userLocation);
-            await RecentDestinations.saveDestination(address);
-            return point;
+          }
+
+          final selected = exactFeature ??
+              (features.isNotEmpty ? features.first as Map<String, dynamic> : null);
+          if (selected != null) {
+            final coords =
+                selected['geometry']['coordinates'] as List<dynamic>;
+            final point = LatLng(
+                (coords[1] as num).toDouble(), (coords[0] as num).toDouble());
+            if (exactFeature != null) {
+              await finish(point, GeocodePrecision.exact);
+              return point;
+            }
+            streetFallback ??= point;
           }
         }
       } catch (e) {
         debugPrint('[Search] Photon API falhou: $e');
       }
 
-      // ── 4. Fallback: geocoding package nativo ──────────────────
-      final locations = await locationFromAddress(address);
-      if (locations.isNotEmpty) {
-        final point =
-            LatLng(locations.first.latitude, locations.first.longitude);
-        await setDestination(point, userLocation);
-        await RecentDestinations.saveDestination(address);
-        return point;
+      // ── 5. Último recurso: ponto aproximado na rua ────────────────────
+      if (streetFallback != null) {
+        await finish(streetFallback, GeocodePrecision.approximate);
+        return streetFallback;
       }
+
+      debugPrint('[Search] Endereço não encontrado: $address');
     } catch (e) {
       debugPrint('[Search] Erro geral na busca de endereço: $e');
     } finally {
       _isRouting = false;
       notifyListeners();
+    }
+    return null;
+  }
+
+  /// Extrai o número predial digitado no fim do endereço ("Rua Europa 74" → "74").
+  static String? extractHouseNumber(String address) {
+    final t = address.trim();
+    Match? m = RegExp(r'(\d{1,5})\s*[a-zA-Z]{0,2}$').firstMatch(t);
+    m ??= RegExp(r'[,-]\s*n?[°º]?\s*(\d{1,5})').firstMatch(t);
+    return m?.group(1);
+  }
+
+  /// Consulta o geocoder nativo da plataforma (Google Play Services no
+  /// Android / Apple no iOS), que interpola o número ao longo da via.
+  Future<LatLng?> _nativeGeocode(String address) async {
+    try {
+      final locations = await locationFromAddress(address);
+      if (locations.isNotEmpty) {
+        return LatLng(locations.first.latitude, locations.first.longitude);
+      }
+    } catch (e) {
+      debugPrint('[Search] Geocoder nativo falhou: $e');
     }
     return null;
   }
@@ -624,12 +743,21 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addMarker(LatLng point, MarkerType type, String description) async {
+  Future<void> addMarker(
+    LatLng point,
+    MarkerType type,
+    String description, {
+    double? heading,
+  }) async {
     final marker = TruckerMarker(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       position: point,
       type: type,
       description: description,
+      heading: heading,
+      confirmations: 1,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
     );
 
     try {
@@ -638,11 +766,55 @@ class TruckController extends ChangeNotifier {
         _customMarkers.add(marker);
         notifyListeners();
       } else {
-        debugPrint('Erro: Falha ao enviar marcador para a API');
+        // Salva localmente mesmo se a API estiver em mock ou offline
+        _customMarkers.add(marker);
+        notifyListeners();
+        debugPrint('Aviso: Marcador adicionado localmente (API offline)');
       }
     } catch (e) {
-      debugPrint('Erro ao enviar marcador para API: $e');
+      _customMarkers.add(marker);
+      notifyListeners();
+      debugPrint('Erro ao enviar marcador para API: $e (salvo localmente)');
     }
+  }
+
+  /// Confirma que um alerta ainda está ativo no local (Padrão Waze / Upvote)
+  Future<bool> confirmMarker(String id) async {
+    final idx = _customMarkers.indexWhere((m) => m.id == id);
+    if (idx != -1) {
+      final m = _customMarkers[idx];
+      _customMarkers[idx] = m.copyWith(
+        confirmations: m.confirmations + 1,
+        updatedAt: DateTime.now(),
+      );
+      notifyListeners();
+      return true;
+    }
+
+    final autoIdx = _automaticPOIs.indexWhere((m) => m.id == id);
+    if (autoIdx != -1) {
+      final m = _automaticPOIs[autoIdx];
+      _automaticPOIs[autoIdx] = m.copyWith(
+        confirmations: m.confirmations + 1,
+        updatedAt: DateTime.now(),
+      );
+      notifyListeners();
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Substitui um alerta existente por um novo tipo (Resolução de Conflito)
+  Future<void> replaceMarker(
+    String oldId,
+    LatLng point,
+    MarkerType newType,
+    String description, {
+    double? heading,
+  }) async {
+    await removeMarker(oldId);
+    await addMarker(point, newType, description, heading: heading);
   }
 
   Future<void> removeMarker(String id) async {
@@ -652,10 +824,15 @@ class TruckController extends ChangeNotifier {
         _customMarkers.removeWhere((m) => m.id == id);
         notifyListeners();
       } else {
-        debugPrint('Erro: API não confirmou a exclusão do marcador $id');
+        // Remove localmente se a API não estiver disponível
+        _customMarkers.removeWhere((m) => m.id == id);
+        notifyListeners();
+        debugPrint('Aviso: Marcador $id removido localmente');
       }
     } catch (e) {
-      debugPrint('Erro ao deletar marcador: $e');
+      _customMarkers.removeWhere((m) => m.id == id);
+      notifyListeners();
+      debugPrint('Erro ao deletar marcador: $e (removido localmente)');
     }
   }
 
@@ -886,6 +1063,26 @@ class TruckController extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Erro ao buscar POIs automáticos: \$e');
+    } finally {
+      _isLoadingPOIs = false;
+      notifyListeners();
+    }
+  }
+
+  /// Busca POIs de um tipo específico e mescla com os já exibidos no mapa.
+  Future<void> findNearbyPOIsByType(LatLng currentPos, MarkerType type) async {
+    _isLoadingPOIs = true;
+    notifyListeners();
+
+    try {
+      final pois = await PoiService.fetchPOIsByType(currentPos, type, radius: 8000);
+      if (pois != null) {
+        // Remove POIs do mesmo tipo para evitar duplicatas e depois re-adiciona
+        _automaticPOIs.removeWhere((m) => m.type == type && m.id.startsWith('osm_'));
+        _automaticPOIs.addAll(pois);
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar POIs por tipo: $e');
     } finally {
       _isLoadingPOIs = false;
       notifyListeners();

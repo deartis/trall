@@ -77,6 +77,16 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
     final tc = context.read<TruckController>();
     final point = await tc.searchAddress(address, userLocation);
 
+    if (point != null &&
+        tc.lastSearchPrecision == GeocodePrecision.approximate &&
+        mounted) {
+      showStyledSnackBar(
+        context: context,
+        message: 'Número não encontrado nos dados do mapa — ponto aproximado na via. Confirme no local.',
+        icon: Icons.warning_amber_rounded,
+      );
+    }
+
     if (point != null) {
       final controller = TextEditingController(text: defaultRecipientName);
       if (!mounted) return;

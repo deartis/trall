@@ -7,6 +7,7 @@ import '../services/location_service.dart';
 import '../controllers/truck_controller.dart';
 import '../widgets/recent_destinations.dart';
 import '../models/delivery_stop.dart';
+import '../services/user_score_service.dart';
 
 
 class AppDrawer extends StatelessWidget {
@@ -35,6 +36,8 @@ class AppDrawer extends StatelessWidget {
     final isSignedIn = auth.isSignedIn;
     final user = auth.currentUser;
     final currentProfile = tc.truckProfile;
+    final scoreService = context.watch<UserScoreService>();
+    final rank = scoreService.currentRank;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
 
@@ -184,18 +187,18 @@ class AppDrawer extends StatelessWidget {
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                    color: AppColors.amber,
+                                    color: rank.color,
                                     shape: BoxShape.circle,
                                     border: Border.all(
                                       color: AppColors.bgAmber,
                                       width: 1.5,
                                     ),
                                   ),
-                                  child: const Center(
+                                  child: Center(
                                     child: Text(
-                                      '1',
-                                      style: TextStyle(
-                                        color: Colors.white,
+                                      '${rank.level}',
+                                      style: const TextStyle(
+                                        color: Colors.black,
                                         fontSize: 10,
                                         fontWeight: FontWeight.w900,
                                       ),
@@ -228,28 +231,29 @@ class AppDrawer extends StatelessWidget {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: AppColors.amberMuted,
+                                          color: rank.color.withValues(alpha: 0.15),
                                           borderRadius:
                                               BorderRadius.circular(4),
                                           border: Border.all(
-                                            color: AppColors.amberBorder,
+                                            color: rank.color.withValues(alpha: 0.35),
                                           ),
                                         ),
-                                        child: const Text(
-                                          '⭐ Motorista',
+                                        child: Text(
+                                          '${rank.emoji} ${rank.title}',
                                           style: TextStyle(
-                                            color: AppColors.amber,
+                                            color: rank.color,
                                             fontSize: 10,
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 6),
-                                      const Text(
-                                        '0 / 100 XP',
-                                        style: TextStyle(
-                                          color: Colors.white38,
+                                      Text(
+                                        '${scoreService.xp} XP',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
                                           fontSize: 10,
+                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                     ],
@@ -265,40 +269,42 @@ class AppDrawer extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // Linha de XP / Em breve
-                        Row(
+                        // Barra de Progresso Real
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.emoji_events_outlined,
-                              color: Colors.white.withValues(alpha: 0.3),
-                              size: 14,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Sistema de progresso em breve',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.3),
-                                fontSize: 11,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.amberSubtle,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: AppColors.amberBorder,
+                            Row(
+                              children: [
+                                Text(
+                                  rank.nextRank != null
+                                      ? 'Próxima patente: ${rank.nextRank!.emoji} ${rank.nextRank!.title}'
+                                      : '🏆 Patente Máxima Alcançada!',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.5),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                              child: const Text(
-                                'EM BREVE',
-                                style: TextStyle(
-                                  color: AppColors.amber,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.8,
-                                ),
+                                const Spacer(),
+                                if (rank.nextRank != null)
+                                  Text(
+                                    'Faltam ${rank.getRemainingXp(scoreService.xp)} XP',
+                                    style: TextStyle(
+                                      color: rank.color,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: rank.getProgress(scoreService.xp),
+                                backgroundColor: Colors.white10,
+                                valueColor: AlwaysStoppedAnimation<Color>(rank.color),
+                                minHeight: 5,
                               ),
                             ),
                           ],

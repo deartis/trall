@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'map_screen.dart';
 import '../controllers/truck_controller.dart';
+import '../models/marker_model.dart';
 import '../services/location_service.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/bottom_nav_bar.dart';
@@ -106,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Barra de atalhos rápidos (Locais Próximos + Destinos Recentes)
+//  Barra de atalhos rápidos — Chips POI especializados para motoristas
 //  Posicionada abaixo da barra de busca integrada do MapScreen
 // ─────────────────────────────────────────────────────────────
 class _QuickAccessBar extends StatelessWidget {
@@ -114,82 +115,103 @@ class _QuickAccessBar extends StatelessWidget {
 
   final Future<void> Function(String address) onAddressTap;
 
+  Future<void> _fetchPOI(
+    BuildContext context,
+    TruckController tc,
+    MarkerType type,
+  ) async {
+    try {
+      if (await LocationService.handlePermission()) {
+        final pos = await LocationService.getCurrentPosition();
+        await tc.findNearbyPOIsByType(LatLng(pos.latitude, pos.longitude), type);
+      } else {
+        if (!context.mounted) return;
+        showStyledSnackBar(
+          context: context,
+          message: 'Permissão de GPS necessária.',
+          icon: Icons.gps_off_rounded,
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      showStyledSnackBar(
+        context: context,
+        message: 'Aguardando sinal de GPS...',
+        icon: Icons.gps_off_rounded,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final topOffset = MediaQuery.of(context).padding.top + 74.0;
     final tc = context.watch<TruckController>();
+    final loading = tc.isLoadingPOIs;
 
     return Positioned(
       top: topOffset,
-      left: 16,
-      right: 16,
+      left: 0,
+      right: 0,
       child: SizedBox(
-        height: 38,
+        height: 40,
         child: ListView(
           scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           physics: const BouncingScrollPhysics(),
           children: [
-            // ── Chip: Locais Próximos ─────────────────────────────────
-            _ActionChip(
-              icon: tc.isLoadingPOIs
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(
-                      Icons.place_rounded,
-                      color: Colors.white,
-                      size: 15,
-                    ),
-              label: tc.isLoadingPOIs ? 'Buscando...' : 'Locais Próximos',
-              isPrimary: true,
-              onTap: tc.isLoadingPOIs
-                  ? null
-                  : () async {
-                      try {
-                        if (await LocationService.handlePermission()) {
-                          final pos = await LocationService.getCurrentPosition();
-                          tc.findNearbyPOIs(LatLng(pos.latitude, pos.longitude));
-                        } else {
-                          if (!context.mounted) return;
-                          showStyledSnackBar(
-                            context: context,
-                            message: 'Permissão de GPS necessária.',
-                            icon: Icons.gps_off_rounded,
-                          );
-                        }
-                      } catch (_) {
-                        if (!context.mounted) return;
-                        showStyledSnackBar(
-                          context: context,
-                          message: 'Aguardando sinal de GPS...',
-                          icon: Icons.gps_off_rounded,
-                        );
-                      }
-                    },
+            // ── ⛽ Postos ─────────────────────────────────────────────
+            _PoiChip(
+              emoji: '⛽',
+              label: 'Postos',
+              color: const Color(0xFFF59E0B),
+              isLoading: loading,
+              onTap: loading ? null : () => _fetchPOI(context, tc, MarkerType.gasStation),
             ),
             const SizedBox(width: 8),
 
-            // ── Chip: Limpar POIs (exibido apenas quando houver POIs) ─
+            // ── ⚖️ Balanças ───────────────────────────────────────────
+            _PoiChip(
+              emoji: '⚖️',
+              label: 'Balanças',
+              color: const Color(0xFFFF9500),
+              isLoading: loading,
+              onTap: loading ? null : () => _fetchPOI(context, tc, MarkerType.weighStation),
+            ),
+            const SizedBox(width: 8),
+
+            // ── 🅿️ Pátios ────────────────────────────────────────────
+            _PoiChip(
+              emoji: '🅿️',
+              label: 'Pátios',
+              color: const Color(0xFFAF52DE),
+              isLoading: loading,
+              onTap: loading ? null : () => _fetchPOI(context, tc, MarkerType.parking),
+            ),
+            const SizedBox(width: 8),
+
+            // ── 🔧 Oficinas ───────────────────────────────────────────
+            _PoiChip(
+              emoji: '🔧',
+              label: 'Oficinas',
+              color: const Color(0xFF6B7280),
+              isLoading: loading,
+              onTap: loading ? null : () => _fetchPOI(context, tc, MarkerType.mechanic),
+            ),
+            const SizedBox(width: 8),
+
+            // ── Limpar POIs (quando há resultados) ───────────────────
             if (tc.automaticPOIs.isNotEmpty) ...[
-              _ActionChip(
-                icon: const Icon(
-                  Icons.clear_all_rounded,
-                  color: Colors.white70,
-                  size: 15,
-                ),
-                label: 'Limpar POIs',
-                isPrimary: false,
+              _PoiChip(
+                emoji: '✕',
+                label: 'Limpar',
+                color: Colors.white.withValues(alpha: 0.45),
+                isLoading: false,
                 onTap: tc.clearAutomaticPOIs,
               ),
               const SizedBox(width: 8),
             ],
 
-            // ── Chips de Destinos Recentes ────────────────────────────
+            // ── Destinos Recentes ─────────────────────────────────────
             RecentDestinations(
               onTap: onAddressTap,
               horizontal: true,
@@ -201,18 +223,23 @@ class _QuickAccessBar extends StatelessWidget {
   }
 }
 
-class _ActionChip extends StatelessWidget {
-  const _ActionChip({
-    required this.icon,
+// ─────────────────────────────────────────────────────────────
+//  Chip POI especializado — design premium com emoji + label
+// ─────────────────────────────────────────────────────────────
+class _PoiChip extends StatelessWidget {
+  const _PoiChip({
+    required this.emoji,
     required this.label,
+    required this.color,
     required this.onTap,
-    this.isPrimary = false,
+    this.isLoading = false,
   });
 
-  final Widget icon;
+  final String emoji;
   final String label;
+  final Color color;
   final VoidCallback? onTap;
-  final bool isPrimary;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -221,40 +248,54 @@ class _ActionChip extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 13),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
           decoration: BoxDecoration(
-            color: isPrimary
-                ? const Color(0xFFE07B1A)
+            color: isLoading
+                ? color.withValues(alpha: 0.06)
                 : const Color(0xFF111318).withValues(alpha: 0.94),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isPrimary
-                  ? const Color(0xFFFF9D3B)
-                  : Colors.white.withValues(alpha: 0.12),
+              color: color.withValues(alpha: 0.30),
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: isPrimary
-                    ? const Color(0xFFE07B1A).withValues(alpha: 0.35)
-                    : Colors.black.withValues(alpha: 0.35),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
+                color: color.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.30),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              icon,
+              isLoading
+                  ? SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        color: color,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(emoji, style: const TextStyle(fontSize: 14)),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: isLoading
+                      ? color.withValues(alpha: 0.60)
+                      : color,
                   fontSize: 12,
-                  fontWeight: isPrimary ? FontWeight.w700 : FontWeight.w600,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.1,
                 ),
               ),
             ],

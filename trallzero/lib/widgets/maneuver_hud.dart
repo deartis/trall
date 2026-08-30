@@ -35,139 +35,175 @@ class ManeuverHud extends StatelessWidget {
     // Cor de destaque baseada no tipo de manobra
     final accentColor = _accentColor(step?.type ?? '', step?.modifier ?? '');
 
+    // Calcula progresso do percurso (0.0 a 1.0)
+    final double routeProgress = tc.routeProgressFraction.clamp(0.0, 1.0);
+
     return AnimatedOpacity(
       opacity: 1.0,
       duration: const Duration(milliseconds: 300),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          // Glassmorphism sutil: fundo semi-transparente com blur
-          color: const Color(0xFF0E1017).withValues(alpha: 0.93),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: accentColor.withValues(alpha: 0.30),
-            width: 1.5,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Bloco principal do HUD ──────────────────────────────────
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0E1017).withValues(alpha: 0.93),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: accentColor.withValues(alpha: 0.30),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: accentColor.withValues(alpha: 0.15),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 2),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                // ── Ícone de manobra — 72×72 para máxima legibilidade ──
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.35),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(icon, color: accentColor, size: 34),
+                ),
+
+                const SizedBox(width: 14),
+
+                // ── Texto da instrução ────────────────────────────────
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Distância em destaque — maior e mais visível
+                      if (distance.isNotEmpty)
+                        Text(
+                          distance,
+                          style: TextStyle(
+                            color: accentColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      // Instrução principal — 22px para leitura rápida
+                      Text(
+                        instruction,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                          letterSpacing: -0.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Nome da rua — secundário
+                      if (street.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          street,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // ── Divisor + Resumo da viagem ────────────────────────
+                if (tc.formattedDistance.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 1,
+                    height: 44,
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        tc.formattedDistance,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          height: 1,
+                          fontFeatures: [ui.FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        tc.formattedDuration,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: const [ui.FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      if (tc.formattedETA.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          tc.formattedETA,
+                          style: TextStyle(
+                            color: accentColor.withValues(alpha: 0.85),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: accentColor.withValues(alpha: 0.15),
-              blurRadius: 20,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.55),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // ── Ícone de manobra ─────────────────────────────────────
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: accentColor.withValues(alpha: 0.35),
-                  width: 1.5,
+
+          // ── Barra de progresso do percurso ──────────────────────────
+          if (routeProgress > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 5, 12, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: routeProgress,
+                  minHeight: 3,
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    accentColor.withValues(alpha: 0.80),
+                  ),
                 ),
               ),
-              child: Icon(icon, color: accentColor, size: 26),
             ),
-
-            const SizedBox(width: 12),
-
-            // ── Texto da instrução ────────────────────────────────────
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Distância em destaque (cor de acento)
-                  if (distance.isNotEmpty)
-                    Text(
-                      distance,
-                      style: TextStyle(
-                        color: accentColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  // Instrução principal — grande e bold
-                  Text(
-                    instruction,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      height: 1.15,
-                      letterSpacing: -0.2,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  // Nome da rua — secundário
-                  if (street.isNotEmpty) ...[
-                    const SizedBox(height: 1),
-                    Text(
-                      street,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-            // ── Divisor vertical + dados secundários ──────────────────
-            if (tc.formattedDistance.isNotEmpty) ...[
-              const SizedBox(width: 10),
-              Container(
-                width: 1,
-                height: 36,
-                color: Colors.white.withValues(alpha: 0.10),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    tc.formattedDistance,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      height: 1,
-                      fontFeatures: [ui.FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tc.formattedDuration,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.40),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      fontFeatures: const [ui.FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
+        ],
       ),
     );
   }

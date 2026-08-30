@@ -20,8 +20,9 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _onUpgradeDB,
     );
   }
 
@@ -32,9 +33,22 @@ class DatabaseService {
         latitude REAL NOT NULL,
         longitude REAL NOT NULL,
         type TEXT NOT NULL,
-        description TEXT NOT NULL
+        description TEXT NOT NULL,
+        heading REAL,
+        confirmations INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT,
+        updatedAt TEXT
       )
     ''');
+  }
+
+  Future<void> _onUpgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE markers ADD COLUMN heading REAL');
+      await db.execute('ALTER TABLE markers ADD COLUMN confirmations INTEGER NOT NULL DEFAULT 1');
+      await db.execute('ALTER TABLE markers ADD COLUMN createdAt TEXT');
+      await db.execute('ALTER TABLE markers ADD COLUMN updatedAt TEXT');
+    }
   }
 
   Future<void> insertMarker(TruckerMarker marker) async {
@@ -67,9 +81,7 @@ class DatabaseService {
   }
 
   Future<void> close() async {
-    final db = _database;
-    if (db != null) {
-      await db.close();
-    }
+    final db = await instance.database;
+    db.close();
   }
 }

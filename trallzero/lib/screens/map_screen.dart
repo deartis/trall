@@ -16,6 +16,10 @@ import '../services/location_service.dart';
 import '../services/ocr_service.dart';
 import '../widgets/navigation_marker.dart';
 import '../widgets/proactive_alert_hud.dart';
+import '../widgets/restriction_alert_hud.dart';
+import '../widgets/highway_corridor_timeline.dart';
+import '../widgets/slope_and_roll_warning_hud.dart';
+import '../widgets/docking_arrival_card.dart';
 import '../controllers/truck_controller.dart';
 import '../models/marker_model.dart';
 import '../models/truck_profile.dart';
@@ -24,6 +28,10 @@ import '../widgets/maneuver_hud.dart';
 import '../widgets/map_ui_extras.dart';
 import '../models/delivery_stop.dart';
 import '../services/preferences_service.dart';
+import '../services/marker_deduplication_service.dart';
+import '../widgets/marker_conflict_sheet.dart';
+import '../services/user_score_service.dart';
+import '../widgets/score_earned_overlay.dart';
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -264,7 +272,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         if (minDist < snappingThreshold) {
           newPos = snapResult.$1;
           _offRouteCount = 0;
-          truckController.updateCurrentStep(newPos, speed: speed); // avança manobra e gerencia alertas de voz
+          truckController.updateCurrentStep(
+            newPos,
+            speed: speed,
+          ); // avança manobra e gerencia alertas de voz
         } else {
           if (position.accuracy <= 20.0) {
             _offRouteCount++;
@@ -1081,12 +1092,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 final color = _markerColor(type);
                 return GestureDetector(
                   onTap: () {
-                    context.read<TruckController>().addMarker(
-                      point,
-                      type,
-                      'Adicionado por motorista',
-                    );
                     Navigator.pop(context);
+                    _handleMarkerSelection(point, type);
                   },
                   child: Container(
                     decoration: BoxDecoration(
@@ -1118,6 +1125,94 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _handleMarkerSelection(LatLng point, MarkerType type) async {
+    final tc = context.read<TruckController>();
+    final allMarkers = [...tc.customMarkers, ...tc.automaticPOIs];
+
+    final result = MarkerDeduplicationService.evaluate(
+      point: point,
+      proposedType: type,
+      existingMarkers: allMarkers,
+      heading: _heading,
+    );
+
+    if (result.isNew) {
+      await tc.addMarker(
+        point,
+        type,
+        'Adicionado por motorista',
+        heading: _heading,
+      );
+      final scoreEvent = await UserScoreService.instance.addScoreForNewReport();
+      if (mounted) {
+        ScoreEarnedOverlay.show(context, scoreEvent);
+      }
+      return;
+    }
+
+    // Se já existir alerta no raio com mesmo sentido, abre o MarkerConflictSheet
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => MarkerConflictSheet(
+        result: result,
+        proposedType: type,
+        onConfirmExisting: () async {
+          await tc.confirmMarker(result.existingMarker!.id);
+          final scoreEvent =
+              await UserScoreService.instance.addScoreForConfirmation();
+          if (mounted) {
+            ScoreEarnedOverlay.show(context, scoreEvent);
+          }
+        },
+        onReplaceExisting: () async {
+          await tc.replaceMarker(
+            result.existingMarker!.id,
+            point,
+            type,
+            'Corrigido por motorista',
+            heading: _heading,
+          );
+          final scoreEvent =
+              await UserScoreService.instance.addScoreForCorrection();
+          if (mounted) {
+            ScoreEarnedOverlay.show(context, scoreEvent);
+          }
+        },
+        onKeepBoth: () async {
+          await tc.addMarker(
+            point,
+            type,
+            'Adicionado por motorista',
+            heading: _heading,
+          );
+          final scoreEvent =
+              await UserScoreService.instance.addScoreForNewReport();
+          if (mounted) {
+            ScoreEarnedOverlay.show(context, scoreEvent);
+          }
+        },
+        onNotThereAnymore: () {
+          tc.removeMarker(result.existingMarker!.id);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, color: Color(0xFFFF9500), size: 20),
+                  SizedBox(width: 10),
+                  Text('Alerta removido do mapa.'),
+                ],
+              ),
+              backgroundColor: Color(0xFF1E222B),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
       ),
     );
   }
@@ -1167,51 +1262,121 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   child: Icon(_markerIcon(marker.type), color: color, size: 26),
                 ),
                 const SizedBox(width: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _markerLabel(marker.type),
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _markerLabel(marker.type),
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      marker.description,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
+                      const SizedBox(height: 4),
+                      Text(
+                        marker.description.isNotEmpty
+                            ? marker.description
+                            : 'Alerta comunitário na via',
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 13,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            // Botão deletar
+            const SizedBox(height: 16),
+            // Contador de confirmações da comunidade
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.verified_user_rounded,
+                    color: color,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Confirmado por ${marker.confirmations} motorista${marker.confirmations > 1 ? 's' : ''}',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (marker.heading != null) ...[
+                    const Spacer(),
+                    Text(
+                      'Sentido ${marker.heading!.round()}°',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            // Botão Confirmar Presença (Upvote)
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(
-                    0xFFFF3B30,
-                  ).withValues(alpha: 0.15),
-                  foregroundColor: const Color(0xFFFF3B30),
-                  side: const BorderSide(color: Color(0xFFFF3B30), width: 1),
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
                   elevation: 0,
                 ),
-                icon: const Icon(Icons.delete_rounded, size: 20),
+                icon: const Icon(Icons.thumb_up_rounded, size: 18),
+                label: const Text(
+                  'Confirmar Presença (Sim, continua lá)',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+                onPressed: () async {
+                  context.read<TruckController>().confirmMarker(marker.id);
+                  Navigator.pop(ctx);
+                  final scoreEvent = await UserScoreService.instance
+                      .addScoreForConfirmation();
+                  if (mounted) {
+                    ScoreEarnedOverlay.show(context, scoreEvent);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Botão deletar
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFF3B30),
+                  side: BorderSide(
+                    color: const Color(0xFFFF3B30).withValues(alpha: 0.5),
+                    width: 1,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                icon: const Icon(Icons.delete_rounded, size: 18),
                 label: const Text(
                   'Remover Marcador',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                 ),
                 onPressed: () {
                   context.read<TruckController>().removeMarker(marker.id);
@@ -1583,7 +1748,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     // Botão OCR / câmera
                                     if (_isOcrLoading)
                                       const Padding(
-                                        padding: EdgeInsets.symmetric(horizontal: 8),
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                        ),
                                         child: SizedBox(
                                           width: 16,
                                           height: 16,
@@ -1627,18 +1794,31 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     // ── Indicador de sinal GPS ─────────────────
                                     Padding(
                                       padding: const EdgeInsets.only(right: 8),
-                                      child: GpsSignalDot(accuracy: _gpsAccuracy),
+                                      child: GpsSignalDot(
+                                        accuracy: _gpsAccuracy,
+                                      ),
                                     ),
                                   ],
                                 ),
                               ),
                               onSubmitted: (value) async {
-                                if (value.isNotEmpty && _currentPosition != null) {
+                                if (value.isNotEmpty &&
+                                    _currentPosition != null) {
                                   final dest = await tc.searchAddress(
                                     value,
                                     _currentPosition!,
                                   );
-                                  if (dest != null) _mapController.move(dest, 16);
+                                  if (!context.mounted || dest == null) return;
+                                  _mapController.move(dest, 16);
+                                  if (tc.lastSearchPrecision ==
+                                      GeocodePrecision.approximate) {
+                                    showStyledSnackBar(
+                                      context: context,
+                                      message:
+                                          'Número não encontrado nos dados do mapa — ponto aproximado na via. Confirme no local.',
+                                      icon: Icons.warning_amber_rounded,
+                                    );
+                                  }
                                 }
                               },
                             ),
@@ -1704,8 +1884,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     s,
                                     _currentPosition!,
                                   );
-                                  if (dest != null)
-                                    _mapController.move(dest, 16);
+                                  if (!context.mounted || dest == null) return;
+                                  _mapController.move(dest, 16);
+                                  if (tc.lastSearchPrecision ==
+                                      GeocodePrecision.approximate) {
+                                    showStyledSnackBar(
+                                      context: context,
+                                      message:
+                                          'Número não encontrado nos dados do mapa — ponto aproximado na via. Confirme no local.',
+                                      icon: Icons.warning_amber_rounded,
+                                    );
+                                  }
                                 }
                               },
                             );
@@ -1795,8 +1984,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             Builder(
               builder: (_) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_panelSizeNotifier.value != 0)
+                  if (_panelSizeNotifier.value != 0) {
                     _panelSizeNotifier.value = 0;
+                  }
                 });
                 return const SizedBox.shrink();
               },
@@ -1889,6 +2079,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               child: const ManeuverHud(),
             ),
 
+          // ── HUD DE RESTRIÇÃO — pulsante vermelho, alta prioridade ──
+          if (tc.isNavigating && !_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 128,
+              left: 0,
+              right: 0,
+              child: RestrictionAlertHud(
+                markers: [...tc.customMarkers, ...tc.automaticPOIs],
+                currentPosition: _currentPosition,
+                routePoints: tc.routePoints,
+                onRecalculate: () async {
+                  if (_currentPosition != null) {
+                    await tc.fetchRoute(_currentPosition!);
+                  }
+                },
+              ),
+            ),
+
           // ── BANNER "NAVEGAÇÃO INICIADA" ────────────────────────────────────
           if (_showNavBanner)
             Positioned(
@@ -1922,6 +2130,70 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 markers: [...tc.customMarkers, ...tc.automaticPOIs],
                 currentPosition: _currentPosition,
                 routePoints: tc.routePoints,
+              ),
+            ),
+
+          // ── HUD DE RISCO DE TOMBAMENTO & DECLIVE DE SERRA ─────────────────
+          if (tc.isNavigating && !_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 115,
+              left: 0,
+              right: 0,
+              child: SlopeAndRollWarningHud(
+                currentPosition: _currentPosition,
+                speedKmh: _lastKnownSpeed * 3.6,
+              ),
+            ),
+
+          // ── TIMELINE DA RODOVIA (Highway Corridor View) ───────────────────
+          if (tc.isNavigating && !_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 115,
+              right: 12,
+              child: HighwayCorridorTimeline(
+                currentPosition: _currentPosition,
+                routePoints: tc.routePoints,
+                markers: [...tc.customMarkers, ...tc.automaticPOIs],
+                deliveryStops: tc.deliveryStops,
+                onSelectPoint: (point) {
+                  _animateMapCamera(
+                    point,
+                    -_heading,
+                    15.0,
+                  );
+                },
+              ),
+            ),
+
+          // ── MODO CHEGADA / DOCAGEM DE CARGA ───────────────────────────────
+          if (tc.isNavigating && !_isFullScreen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 120,
+              left: 0,
+              right: 0,
+              child: DockingArrivalCard(
+                currentPosition: _currentPosition,
+                onZoomInDock: () {
+                  if (_currentPosition != null) {
+                    _animateMapCamera(
+                      _currentPosition!,
+                      -_heading,
+                      18.0,
+                    );
+                  }
+                },
+                onCompleteDelivery: () async {
+                  await tc.endRoute();
+                  _mapController.rotate(0);
+                  if (mounted) {
+                    showStyledSnackBar(
+                      context: context,
+                      message: 'Entrega concluída com sucesso! Parabéns, motorista.',
+                      icon: Icons.check_circle_rounded,
+                      iconColor: const Color(0xFF34C759),
+                    );
+                  }
+                },
               ),
             ),
 
@@ -2211,23 +2483,35 @@ class _SpeedHud extends StatelessWidget {
   /// Velocidade em metros por segundo (vinda do GPS)
   final double speedMs;
 
+  Color _speedColor(int kmh) {
+    if (kmh > 80) return const Color(0xFFFF3B30); // perigo
+    if (kmh > 60) return const Color(0xFFFF9500); // atenção
+    return Colors.white;
+  }
+
   @override
   Widget build(BuildContext context) {
     final kmh = (speedMs * 3.6).round();
+    final color = _speedColor(kmh);
 
-    return Container(
-      width: 68,
-      padding: const EdgeInsets.symmetric(vertical: 10),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: 80,
+      padding: const EdgeInsets.symmetric(vertical: 11),
       decoration: BoxDecoration(
         color: const Color(0xFF111318).withValues(alpha: 0.93),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
+          color: kmh > 80
+              ? const Color(0xFFFF3B30).withValues(alpha: 0.40)
+              : Colors.white.withValues(alpha: 0.10),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
+            color: kmh > 80
+                ? const Color(0xFFFF3B30).withValues(alpha: 0.20)
+                : Colors.black.withValues(alpha: 0.40),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -2236,25 +2520,22 @@ class _SpeedHud extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '$kmh',
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 300),
             style: TextStyle(
-              color: kmh > 80
-                  ? const Color(0xFFFF3B30)
-                  : kmh > 60
-                  ? const Color(0xFFFF9500)
-                  : Colors.white,
-              fontSize: 26,
+              color: color,
+              fontSize: 34,
               fontWeight: FontWeight.w900,
               height: 1,
               fontFeatures: const [ui.FontFeature.tabularFigures()],
             ),
+            child: Text('$kmh'),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 3),
           Text(
             'km/h',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.4),
+              color: Colors.white.withValues(alpha: 0.40),
               fontSize: 10,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.5,
