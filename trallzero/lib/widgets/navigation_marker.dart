@@ -1,12 +1,13 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
 import '../models/truck_profile.dart';
 
 /// Marcador de navegação do veículo no mapa.
 ///
-/// Exibe uma seta elegante apontando sempre para CIMA — a rotação
-/// correta é aplicada pelo [Marker] pai via `rotate: true`, que
-/// sincroniza com o heading do mapa.
+/// Exibe uma seta elegante que se orienta automaticamente com a direção
+/// do veículo/aparelho, sincronizada tanto no modo de rotação do mapa
+/// quanto no modo livre (North-up).
 ///
 /// O anel pulsante muda de velocidade e cor conforme a speed:
 ///   • parado  → âmbar, pulso lento
@@ -17,7 +18,8 @@ class NavigationMarker extends StatefulWidget {
   final double size;
   final double speed; // em m/s
   final TruckProfileType profileType;
-  final double heading; // em graus — mantido para compatibilidade, mas não usado aqui
+  final double heading; // em graus (0° = Norte)
+  final double mapRotation; // rotação atual do mapa em graus
 
   const NavigationMarker({
     super.key,
@@ -25,6 +27,7 @@ class NavigationMarker extends StatefulWidget {
     this.speed = 0.0,
     this.profileType = TruckProfileType.truck,
     this.heading = 0.0,
+    this.mapRotation = 0.0,
   });
 
   @override
@@ -133,9 +136,12 @@ class _NavigationMarkerState extends State<NavigationMarker>
           ),
 
           // ── Seta de navegação ─────────────────────────────────────
-          CustomPaint(
-            size: Size(size * 0.60, size * 0.72),
-            painter: _ArrowPainter(color: color),
+          Transform.rotate(
+            angle: (widget.heading + widget.mapRotation) * (math.pi / 180.0),
+            child: CustomPaint(
+              size: Size(size * 0.60, size * 0.72),
+              painter: _ArrowPainter(color: color),
+            ),
           ),
         ],
       ),

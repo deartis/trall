@@ -53,6 +53,11 @@ import '../services/api_service.dart';
 //      - false → câmera livre (usuário arrastou o mapa).
 // ============================================================
 
+/// Chave de API opcional para tiles de alta resolução do CartoDB Dark Matter.
+/// Obtenha uma chave gratuita (5 milhões reqs/mês) em: https://carto.com/basemaps/apikey
+/// Deixe vazia para usar o OpenStreetMap oficial com Dark Mode sem exigir chave de API.
+const String kCartoApiKey = '';
+
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -93,12 +98,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double _lastKnownSpeed = 0;
   Timer? _compassCheckTimer;
 
-  // --- Detecção de bússola dummy (ex: Moto G30) ---
-  int _compassEventCount = 0;
-  double? _firstCompassValue;
+  // --- Sensor de Bússola & Orientação ---
   double? _lastCompassRawValue;
-  bool _isCompassDummy = false;
   bool _compassAvailable = false;
+  LatLng? _lastBearingGpsPosition;
 
   // --- Follow mode e FullScreen ---
   bool _isFollowMode = true;
@@ -166,23 +169,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
       final anim = _activeAnimation!;
 
-      // Se não há interpolação de câmera definida (ex: modo livre), sai
-      if (_latLngTween == null ||
-          _rotationTween == null ||
-          _zoomTween == null) {
+      if (_latLngTween == null || _zoomTween == null) {
         return;
       }
 
       final currentPos = _latLngTween!.evaluate(anim);
       final currentZoom = _zoomTween!.evaluate(anim);
 
-      final isMoving = _lastKnownSpeed > 1.5;
-      if (isMoving || _isCompassDummy || !_compassAvailable) {
+      if (_rotationTween != null) {
         final currentRot = _rotationTween!.evaluate(anim);
         _mapController.moveAndRotate(currentPos, currentZoom, currentRot);
-      } else {
-        // Parado com bússola: posição animada, rotação em tempo real
+      } else if (_isFollowMode) {
         _mapController.moveAndRotate(currentPos, currentZoom, -_heading);
+      }
+    });
+
+    _cameraAnimationController!.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _rotationTween = null;
       }
     });
 
@@ -321,11 +325,32 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
       final gpsHeading = _safeGpsHeading(position);
       final bool useGpsHeading =
-          gpsHeading != null && (speed > 1.5 || _isCompassDummy);
+          gpsHeading != null && (speed > 2.0 || !_compassAvailable);
 
       if (useGpsHeading) {
-        _heading = _smoothAngle(_heading, gpsHeading, factor: 0.95);
+        _heading = _smoothAngle(_heading, gpsHeading, factor: 0.85);
         _headingNotifier.value = _heading;
+        _lastBearingGpsPosition = newPos;
+      } else if (!_compassAvailable) {
+        // Aparelhos sem magnetômetro: calcula direção pelo deslocamento ao caminhar
+        if (_lastBearingGpsPosition != null) {
+          final distMoved = const Distance().as(
+            LengthUnit.Meter,
+            _lastBearingGpsPosition!,
+            newPos,
+          );
+          if (distMoved >= 1.5) {
+            final walkBearing = const Distance().bearing(
+              _lastBearingGpsPosition!,
+              newPos,
+            );
+            _heading = _smoothAngle(_heading, walkBearing, factor: 0.85);
+            _headingNotifier.value = _heading;
+            _lastBearingGpsPosition = newPos;
+          }
+        } else {
+          _lastBearingGpsPosition = newPos;
+        }
       }
 
       // Animação contínua do marcador do veículo:
@@ -363,7 +388,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
         _animateMapCamera(
           targetCenter,
-          -_heading,
+          truckController.isNavigating ? -_heading : 0.0,
           targetZoom,
           customCurve: Curves.linear,
         );
@@ -419,18 +444,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     final events = FlutterCompass.events;
 
     if (events == null) {
-      debugPrint('[Sensor] Bússola não encontrada no hardware.');
-      setState(() {
-        _isCompassDummy = true;
-        _compassAvailable = false;
-      });
+      debugPrint('[Sensor] Bússola não suportada no hardware.');
+      _compassAvailable = false;
       return;
     }
 
     _compassCheckTimer = Timer(const Duration(seconds: 4), () {
-      if ((!_compassAvailable || _isCompassDummy) && mounted) {
+      if (!_compassAvailable && mounted) {
         debugPrint(
-          '[Sensor] Bússola não funcional – usando GPS como fallback.',
+          '[Sensor] Bússola sem leitura – usando GPS como fallback.',
         );
       }
     });
@@ -439,53 +461,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final h = event.heading;
       if (!mounted || h == null || h.isNaN) return;
 
-      // Detecção de sensor dummy (valor constante após 15 eventos)
-      _compassEventCount++;
-      _firstCompassValue ??= h;
-      if (!_isCompassDummy && _compassEventCount > 15) {
-        if (h == _firstCompassValue) {
-          setState(() {
-            _isCompassDummy = true;
-            _compassAvailable = false;
-          });
-          _compassCheckTimer?.cancel();
-          debugPrint('[Sensor] Bússola DUMMY detectada (valor constante).');
-          return;
-        }
-      }
-
-      if (_isCompassDummy) return;
-
       if (!_compassAvailable) {
-        setState(() => _compassAvailable = true);
+        _compassAvailable = true;
         _compassCheckTimer?.cancel();
       }
 
-      // Bússola só controla heading quando parado (GPS assume em movimento)
-      if (_lastKnownSpeed > 1.5) return;
+      // Normaliza heading para [0, 360) (no Android o valor pode vir de -180 a 180)
+      final double normalizedH = (h % 360.0 + 360.0) % 360.0;
 
-      // Filtro de histerese (deadband): ignora variações menores que 1.5°
-      if (_lastCompassRawValue != null) {
-        final double rawDiff = ((h - _lastCompassRawValue! + 540) % 360) - 180;
-        if (rawDiff.abs() < 1.5) return;
+      final bool isFirstReading = _lastCompassRawValue == null;
+
+      // Filtro de histerese (deadband): ignora ruído insignificante (< 0.4°)
+      if (!isFirstReading) {
+        final double rawDiff =
+            ((normalizedH - _lastCompassRawValue! + 540) % 360) - 180;
+        if (rawDiff.abs() < 0.4) return;
       }
-      _lastCompassRawValue = h;
+      _lastCompassRawValue = normalizedH;
 
-      _heading = _smoothAngle(_heading, h, factor: 0.85);
+      // Primeiro evento de bússola: captura direção real imediatamente sem delay de 0°
+      if (isFirstReading) {
+        _heading = normalizedH;
+      } else if (_lastKnownSpeed <= 2.5) {
+        _heading = _smoothAngle(_heading, normalizedH, factor: 0.5);
+      }
       _headingNotifier.value = _heading;
 
-      if (!_isFollowMode) return;
+      // Se estiver em modo follow e não houver animação de câmera em curso, sincroniza rotação
+      if (!_isFollowMode || _rotationTween != null) return;
 
-      if (_cameraAnimationController == null ||
-          !_cameraAnimationController!.isAnimating) {
-        try {
-          final center = _currentPosition ?? _mapController.camera.center;
-          final zoom = _mapController.camera.zoom;
-          _mapController.moveAndRotate(center, zoom, -_heading);
-        } catch (e) {
-          debugPrint('[Compass] MapController não pronto: $e');
-        }
+      try {
+        final center = _animatedCurrentPosition ??
+            _currentPosition ??
+            _mapController.camera.center;
+        final zoom = _mapController.camera.zoom;
+        _mapController.moveAndRotate(center, zoom, -_heading);
+      } catch (e) {
+        debugPrint('[Compass] MapController não pronto: $e');
       }
+    }, onError: (err) {
+      debugPrint('[Sensor] Erro no stream da bússola: $err');
+      _compassAvailable = false;
     });
   }
 
@@ -619,12 +635,30 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   double? _safeGpsHeading(Position p) {
     if (p.heading.isNaN || p.heading < 0) return null;
+    // No Android, heading 0.0 com velocidade < 0.5 m/s é o fallback de "sem direção"
+    if (p.heading == 0.0 && p.speed < 0.5) return null;
     return p.heading;
   }
 
   double _safeSpeed(Position p) {
     if (p.speed.isNaN || p.speed < 0) return 0;
     return p.speed;
+  }
+
+  /// Calcula a direção inicial (bearing) do primeiro trecho da rota
+  double? _getInitialRouteBearing(LatLng currentPos, List<LatLng> routePoints) {
+    if (routePoints.isEmpty) return null;
+    const distanceCalc = Distance();
+    for (int i = 0; i < routePoints.length; i++) {
+      final dist = distanceCalc.as(LengthUnit.Meter, currentPos, routePoints[i]);
+      if (dist >= 10.0) {
+        return distanceCalc.bearing(currentPos, routePoints[i]);
+      }
+    }
+    if (routePoints.length >= 2) {
+      return distanceCalc.bearing(routePoints[0], routePoints[1]);
+    }
+    return null;
   }
 
   LatLng _projectPosition(LatLng origin, double bearing, double meters) {
@@ -1575,20 +1609,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 onTap: (tapPosition, point) => FocusScope.of(context).unfocus(),
               ),
               children: [
-                ColorFiltered(
-                  colorFilter: const ColorFilter.matrix(<double>[
-                    1.4, 0, 0, 0, 30, // Red: multiply by 1.4, add 30
-                    0, 1.4, 0, 0, 30, // Green
-                    0, 0, 1.4, 0, 30, // Blue
-                    0, 0, 0, 1, 0, // Alpha
-                  ]),
-                  child: TileLayer(
-                    urlTemplate:
-                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.trallzero.app',
-                  ),
-                ),
+                // Se kCartoApiKey for preenchida, usa CartoDB Dark Matter (@2x retina).
+                // Caso contrário, usa OpenStreetMap gratuito sem necessidade de chave de API.
+                kCartoApiKey.isNotEmpty
+                    ? TileLayer(
+                        urlTemplate:
+                            'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=$kCartoApiKey',
+                        subdomains: const ['a', 'b', 'c', 'd'],
+                        userAgentPackageName: 'com.trallzero.app',
+                        maxZoom: 20,
+                        retinaMode: true,
+                      )
+                    : TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.trallzero.app',
+                        maxZoom: 19,
+                        tileBuilder: darkModeTileBuilder,
+                      ),
                 if (tc.routePoints.isNotEmpty)
                   PolylineLayer(
                     polylines: [
@@ -1625,11 +1663,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         point: _animatedCurrentPosition!,
                         width: 54,
                         height: 54,
+                        // rotate: true aplica contra-rotação do mapa no filho,
+                        // então o Transform.rotate(heading) no NavigationMarker
+                        // aponta para a direção absoluta (bússola real).
                         rotate: true,
-                        child: NavigationMarker(
-                          speed: _lastKnownSpeed,
-                          profileType: tc.truckProfile.type,
-                          heading: _heading,
+                        child: ValueListenableBuilder<double>(
+                          valueListenable: _headingNotifier,
+                          builder: (context, heading, _) {
+                            double currentMapRot = 0.0;
+                            try {
+                              currentMapRot = _mapController.camera.rotation;
+                            } catch (_) {}
+                            return NavigationMarker(
+                              speed: _lastKnownSpeed,
+                              profileType: tc.truckProfile.type,
+                              heading: heading,
+                              mapRotation: currentMapRot,
+                            );
+                          },
                         ),
                       ),
                     ...tc.deliveryStops.asMap().entries.map((entry) {
@@ -2151,6 +2202,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     _showReroutingBanner = false;
                     _showNavBanner = true;
                   });
+
+                  // Alinha imediatamente a direção do veículo/mapa com o sentido da rota
+                  if (_currentPosition != null && tc.routePoints.isNotEmpty) {
+                    final routeBearing = _getInitialRouteBearing(_currentPosition!, tc.routePoints);
+                    if (routeBearing != null) {
+                      _heading = (routeBearing % 360.0 + 360.0) % 360.0;
+                      _headingNotifier.value = _heading;
+                    }
+                  }
+
                   _navBannerTimer?.cancel();
                   _navBannerTimer = Timer(
                     const Duration(milliseconds: 2500),
@@ -2161,7 +2222,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   if (_currentPosition != null) {
                     _moveNavigationCamera(
                       _currentPosition!,
-                      customDuration: const Duration(milliseconds: 1500),
+                      customDuration: const Duration(milliseconds: 1200),
                       customCurve: Curves.fastOutSlowIn,
                     );
                   }
