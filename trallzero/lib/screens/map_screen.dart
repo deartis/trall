@@ -71,7 +71,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final LatLng _initialCenter = const LatLng(-22.9068, -43.1729);
 
   LatLng? _currentPosition;
-  LatLng? _animatedCurrentPosition; // Posição suave renderizada no mapa
+  // Posição suave renderizada no mapa. ValueNotifier para que o marker do
+  // veículo seja reconstruído SEM disparar rebuild de 60fps da tela inteira.
+  final ValueNotifier<LatLng?> _animatedPositionNotifier = ValueNotifier<LatLng?>(null);
   StreamSubscription<Position>? _positionStream;
   StreamSubscription<CompassEvent>? _compassStream;
   Timer? _debounce;
@@ -86,6 +88,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Duration _animationDuration = const Duration(
     milliseconds: 900,
   ); // Duração adaptativa
+
+  // Banda de zoom atual — histerese evita "respiração" (16.5↔17.0) quando a
+  // velocidade oscila em torno dos limiares 13/22 km/h.
+  double? _zoomBand;
 
   // --- Animação dedicada do marcador do veículo (independente da câmera) ---
   // Separada para que reset() da câmera não cause stuttering no ícone do truck.
@@ -160,8 +166,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
     _vehicleAnimController!.addListener(() {
       if (!mounted || _vehicleLatLngTween == null) return;
-      final pos = _vehicleLatLngTween!.evaluate(_vehicleAnimController!);
-      setState(() => _animatedCurrentPosition = pos);
+      final t = Curves.easeOutCubic.transform(_vehicleAnimController!.value);
+      final pos = _vehicleLatLngTween!.transform(t);
+      _animatedPositionNotifier.value = pos;
     });
 
     _cameraAnimationController!.addListener(() {
@@ -211,6 +218,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     _cameraAnimationController?.dispose();
     _vehicleAnimController?.dispose();
     _headingNotifier.dispose();
+    _animatedPositionNotifier.dispose();
     _panelSizeNotifier.dispose();
     super.dispose();
   }
@@ -234,7 +242,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final pos = LatLng(position.latitude, position.longitude);
       setState(() {
         _currentPosition = pos;
-        _animatedCurrentPosition = pos;
+        _animatedPositionNotifier.value = pos;
         _lastKnownSpeed = _safeSpeed(position);
       });
 
@@ -297,25 +305,26 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       }
 
       // --- Cálculo da Duração Dinâmica Adaptativa ---
-      // Limitada a 600ms para que updates de 1m pareçam fluídos.
+      // Cobre TODO o intervalo do GPS (fator ~1.05) para a animação terminar
+      // exatamente quando o próximo update chegar — elimina a lacuna de freeze.
       final now = DateTime.now();
       if (_lastGpsUpdateTime != null) {
         final elapsed = now.difference(_lastGpsUpdateTime!);
-        if (elapsed.inMilliseconds >= 200 && elapsed.inMilliseconds <= 2000) {
+        if (elapsed.inMilliseconds >= 150 && elapsed.inMilliseconds <= 2500) {
           _animationDuration = Duration(
-            milliseconds: (elapsed.inMilliseconds * 0.85)
-                .clamp(200, 600)
+            milliseconds: (elapsed.inMilliseconds * 1.05)
+                .clamp(250, 900)
                 .round(),
           );
         } else {
-          _animationDuration = const Duration(milliseconds: 600);
+          _animationDuration = const Duration(milliseconds: 800);
         }
       }
       _lastGpsUpdateTime = now;
 
       // Captura PRIMEIRO a posição visualmente renderizada (antes de qualquer setState)
       // para que o novo tween comece exatamente onde a seta está na tela agora.
-      final livePos = _animatedCurrentPosition ?? _currentPosition ?? newPos;
+      final livePos = _animatedPositionNotifier.value ?? _currentPosition ?? newPos;
 
       setState(() {
         _currentPosition = newPos;
@@ -325,7 +334,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
       final gpsHeading = _safeGpsHeading(position);
       final bool useGpsHeading =
-          gpsHeading != null && (speed > 2.0 || !_compassAvailable);
+          gpsHeading != null && (speed >= 1.0 || !_compassAvailable);
 
       if (useGpsHeading) {
         _heading = _smoothAngle(_heading, gpsHeading, factor: 0.85);
@@ -366,42 +375,48 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         final LatLng targetCenter;
 
         if (truckController.isNavigating) {
-          if (speed > 22) {
-            targetZoom = 15.5;
-          } else if (speed > 13) {
-            targetZoom = 16.5;
+          // Histerese de ~2 km/h: mantém a banda atual até a velocidade cruzar
+          // o limiar com margem, evitando o vai-e-vem de zoom (respiração).
+          if (_zoomBand == null) {
+            targetZoom = speed > 22 ? 15.5 : (speed > 13 ? 16.5 : 17.0);
+          } else if (_zoomBand == 17.0) {
+            targetZoom = speed > 15.0 ? 16.5 : 17.0;
+          } else if (_zoomBand == 15.5) {
+            targetZoom = speed < 15.0 ? 16.5 : 15.5;
           } else {
-            targetZoom = 17.0;
+            targetZoom = speed > 22.0 ? 15.5 : (speed < 13.0 ? 17.0 : 16.5);
           }
+          _zoomBand = targetZoom;
 
           final double lookAheadMeters = (180 * math.pow(2, 17 - targetZoom))
               .toDouble();
           targetCenter = _projectPosition(newPos, _heading, lookAheadMeters);
         } else {
-          double tempZoom = 16.0;
+          double tempZoom = 16.5;
           try {
             tempZoom = _mapController.camera.zoom;
           } catch (_) {}
           targetZoom = tempZoom;
-          targetCenter = newPos;
+          // Lookahead sutil para manter visão da rua à frente no sentido de deslocamento
+          final double lookAheadMeters = speed > 1.2 ? 35.0 : 0.0;
+          targetCenter = lookAheadMeters > 0
+              ? _projectPosition(newPos, _heading, lookAheadMeters)
+              : newPos;
         }
 
         _animateMapCamera(
           targetCenter,
-          truckController.isNavigating ? -_heading : 0.0,
+          -_heading,
           targetZoom,
-          customCurve: Curves.linear,
+          customCurve: Curves.easeOutCubic,
         );
       } else {
         _latLngTween = null;
         _rotationTween = null;
         _zoomTween = null;
-        _activeAnimation = _cameraAnimationController!;
-
-        _cameraAnimationController?.stop();
-        _cameraAnimationController?.duration = _animationDuration;
-        _cameraAnimationController?.reset();
-        _cameraAnimationController?.forward();
+        // Sem follow mode o usuário controla o mapa — não resetamos a câmera
+        // (o reset com tweens nulos só congelava o frame e criava a pausa).
+        _activeAnimation = null;
       }
     });
   }
@@ -482,7 +497,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       // Primeiro evento de bússola: captura direção real imediatamente sem delay de 0°
       if (isFirstReading) {
         _heading = normalizedH;
-      } else if (_lastKnownSpeed <= 2.5) {
+      } else if (_lastKnownSpeed < 1.0) {
         _heading = _smoothAngle(_heading, normalizedH, factor: 0.5);
       }
       _headingNotifier.value = _heading;
@@ -490,12 +505,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       // Se estiver em modo follow e não houver animação de câmera em curso, sincroniza rotação
       if (!_isFollowMode || _rotationTween != null) return;
 
+      // Limiar angular: ignora variações de bússola abaixo de ~0.6° (ruído do
+      // sensor), eliminando micro-saltos de rotação enquanto o veículo está parado.
+      final double targetRot = -_heading;
+      final double currentRot = _mapController.camera.rotation;
+      final double delta = ((targetRot - currentRot + 540) % 360) - 180;
+      if (delta.abs() < 0.6) return;
+
       try {
-        final center = _animatedCurrentPosition ??
+        final center = _animatedPositionNotifier.value ??
             _currentPosition ??
             _mapController.camera.center;
         final zoom = _mapController.camera.zoom;
-        _mapController.moveAndRotate(center, zoom, -_heading);
+        _mapController.moveAndRotate(center, zoom, targetRot);
       } catch (e) {
         debugPrint('[Compass] MapController não pronto: $e');
       }
@@ -535,7 +557,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _cameraAnimationController?.stop();
       _mapController.moveAndRotate(lookAheadCenter, zoom, -_heading);
       setState(() {
-        _animatedCurrentPosition = position;
+        _animatedPositionNotifier.value = position;
       });
     } else {
       _animateMapCamera(
@@ -589,12 +611,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       return;
     }
 
-    if (distance > 500) {
+    if (distance > 3000) {
       _cameraAnimationController?.stop();
       _mapController.moveAndRotate(destCenter, destZoom, destRotation);
       setState(() {
         if (_currentPosition != null) {
-          _animatedCurrentPosition = _currentPosition;
+          _animatedPositionNotifier.value = _currentPosition;
         }
       });
       return;
@@ -855,7 +877,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       final rawText = await OcrService.instance.extractTextFromImage(
         picked.path,
       );
-      final address = OcrService.instance.parseAddressFromText(rawText);
+      final address = OcrService.parseAddressFromText(rawText);
 
       if (address.isNotEmpty && mounted) {
         _searchController.text = address;
@@ -1656,29 +1678,26 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
-                MarkerLayer(
+                ValueListenableBuilder<LatLng?>(
+                  valueListenable: _animatedPositionNotifier,
+                  builder: (context, pos, _) => MarkerLayer(
                   markers: [
-                    if (_animatedCurrentPosition != null)
+                    if (pos != null)
                       Marker(
-                        point: _animatedCurrentPosition!,
+                        point: pos,
                         width: 54,
                         height: 54,
-                        // rotate: true aplica contra-rotação do mapa no filho,
-                        // então o Transform.rotate(heading) no NavigationMarker
-                        // aponta para a direção absoluta (bússola real).
-                        rotate: true,
+                        // rotate: false mantém o marcador solidário ao plano do mapa.
+                        // Com a seta rotacionada por heading dentro do NavigationMarker,
+                        // em modo Follow (-heading) ela aponta sempre para o TOPO da tela.
+                        rotate: false,
                         child: ValueListenableBuilder<double>(
                           valueListenable: _headingNotifier,
                           builder: (context, heading, _) {
-                            double currentMapRot = 0.0;
-                            try {
-                              currentMapRot = _mapController.camera.rotation;
-                            } catch (_) {}
                             return NavigationMarker(
                               speed: _lastKnownSpeed,
                               profileType: tc.truckProfile.type,
                               heading: heading,
-                              mapRotation: currentMapRot,
                             );
                           },
                         ),
@@ -1825,6 +1844,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       );
                     }),
                   ],
+                ),
                 ),
               ],
             ),
@@ -2222,8 +2242,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   if (_currentPosition != null) {
                     _moveNavigationCamera(
                       _currentPosition!,
-                      customDuration: const Duration(milliseconds: 1200),
-                      customCurve: Curves.fastOutSlowIn,
+                      customDuration: const Duration(milliseconds: 700),
+                      customCurve: Curves.easeOutCubic,
                     );
                   }
                 } else {

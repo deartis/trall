@@ -185,7 +185,7 @@ class _NavigationPanelState extends State<NavigationPanel> {
           child: ListView(
             controller: scrollController,
             padding: EdgeInsets.zero,
-            physics: const ClampingScrollPhysics(),
+            physics: const BouncingScrollPhysics(parent: ClampingScrollPhysics()),
             children: [
               // ── Handle ────────────────────────────────────────────
               Stack(

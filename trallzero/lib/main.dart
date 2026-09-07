@@ -35,7 +35,8 @@ void main() async {
 
   runApp(
     MultiProvider(
-      providers: [
+      providers:
+      [
         ChangeNotifierProvider(create: (_) => TruckController()),
         ChangeNotifierProvider(create: (_) => PreferencesService.instance),
         ChangeNotifierProvider(create: (_) => UserScoreService.instance),

@@ -197,8 +197,8 @@ class _RouteManagerScreenState extends State<RouteManagerScreen> {
 
     setState(() => _isSearching = true);
     final rawText = await OcrService.instance.extractTextFromImage(image.path);
-    final guessedAddress = OcrService.instance.parseAddressFromText(rawText);
-    final guessedName = OcrService.instance.parseClientNameFromText(rawText);
+    final guessedAddress = OcrService.parseAddressFromText(rawText);
+    final guessedName = OcrService.parseClientNameFromText(rawText);
     if (mounted) setState(() => _isSearching = false);
     if (!mounted) return;
 

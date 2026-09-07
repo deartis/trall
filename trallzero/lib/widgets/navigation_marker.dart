@@ -19,7 +19,6 @@ class NavigationMarker extends StatefulWidget {
   final double speed; // em m/s
   final TruckProfileType profileType;
   final double heading; // em graus (0° = Norte)
-  final double mapRotation; // rotação atual do mapa em graus
 
   const NavigationMarker({
     super.key,
@@ -27,7 +26,6 @@ class NavigationMarker extends StatefulWidget {
     this.speed = 0.0,
     this.profileType = TruckProfileType.truck,
     this.heading = 0.0,
-    this.mapRotation = 0.0,
   });
 
   @override
@@ -137,7 +135,7 @@ class _NavigationMarkerState extends State<NavigationMarker>
 
           // ── Seta de navegação ─────────────────────────────────────
           Transform.rotate(
-            angle: (widget.heading + widget.mapRotation) * (math.pi / 180.0),
+            angle: widget.heading * (math.pi / 180.0),
             child: CustomPaint(
               size: Size(size * 0.60, size * 0.72),
               painter: _ArrowPainter(color: color),
