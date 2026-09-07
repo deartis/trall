@@ -257,10 +257,36 @@ class _SlopeAndRollWarningHudState extends State<SlopeAndRollWarningHud>
 
     // 2. Verifica declives acentuados de serra nos segmentos da rota (< 800m)
     final maxSlopeAllowed = profile.recommendedMaxSlope;
-    for (final seg in tc.routeAnalysisSegments) {
+    final slopeThreshold = -(maxSlopeAllowed.clamp(6.5, 12.0));
+    final segments = tc.routeAnalysisSegments;
+
+    for (var i = 0; i < segments.length; i++) {
+      final seg = segments[i];
       final distToStart = distCalc.as(LengthUnit.Meter, pos, seg.start);
-      // Se está a menos de 700m e o declive é forte (descida > maxSlopeAllowed ou > 7%)
-      if (distToStart > 10 && distToStart <= 700 && seg.slopePercent < -6.5) {
+
+      // Se está a menos de 700m e a inclinação atinge o limiar
+      if (distToStart > 10 && distToStart <= 700 && seg.slopePercent <= slopeThreshold) {
+        // Validação de declive real contínuo:
+        // Evita alarmes falsos em trechos curtos, ondulações ou ruídos de altimetria
+        var totalDrop = seg.startAltitude - seg.endAltitude;
+        var totalDescentDist = seg.distanceMeters;
+
+        for (var j = i + 1; j < segments.length; j++) {
+          final nextSeg = segments[j];
+          if (nextSeg.slopePercent <= -5.0) {
+            totalDrop += (nextSeg.startAltitude - nextSeg.endAltitude);
+            totalDescentDist += nextSeg.distanceMeters;
+            if (totalDescentDist >= 250) break;
+          } else {
+            break;
+          }
+        }
+
+        // Exige pelo menos 70m de extensão de declive E no mínimo 6.0m de queda vertical real
+        if (totalDescentDist < 70 || totalDrop < 6.0) {
+          continue;
+        }
+
         final slopeAbs = seg.slopePercent.abs().toStringAsFixed(1);
         final distRounded = (distToStart / 10).round() * 10;
         final isSevere = seg.slopePercent <= -10.0;
