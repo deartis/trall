@@ -10,6 +10,8 @@ class MarkerConflictSheet extends StatelessWidget {
   final VoidCallback onReplaceExisting;
   final VoidCallback onKeepBoth;
   final VoidCallback? onNotThereAnymore;
+  final bool isAuthor;
+  final bool hasConfirmed;
 
   const MarkerConflictSheet({
     super.key,
@@ -19,6 +21,8 @@ class MarkerConflictSheet extends StatelessWidget {
     required this.onReplaceExisting,
     required this.onKeepBoth,
     this.onNotThereAnymore,
+    this.isAuthor = false,
+    this.hasConfirmed = false,
   });
 
   static Color colorFor(MarkerType t) => switch (t) {
@@ -189,32 +193,100 @@ class MarkerConflictSheet extends StatelessWidget {
         ),
         const SizedBox(height: 22),
 
-        // Botão Principal: Confirmar Presença (Upvote)
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+        if (isAuthor) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF2563EB).withValues(alpha: 0.35),
+                width: 1,
               ),
-              elevation: 4,
-              shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.4),
             ),
-            icon: const Icon(Icons.thumb_up_rounded, size: 20),
-            label: const Text(
-              'Sim, ainda está lá! (Confirmar)',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.person_pin_circle_rounded,
+                  color: Color(0xFF60A5FA),
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Você já reportou este alerta no local',
+                  style: TextStyle(
+                    color: Color(0xFF93C5FD),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
-            onPressed: () {
-              Navigator.pop(context);
-              onConfirmExisting();
-            },
           ),
-        ),
-        const SizedBox(height: 10),
+          const SizedBox(height: 10),
+        ] else if (hasConfirmed) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF34C759).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFF34C759).withValues(alpha: 0.35),
+                width: 1,
+              ),
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF34C759),
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Você já confirmou a presença deste alerta',
+                  style: TextStyle(
+                    color: Color(0xFF34C759),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ] else ...[
+          // Botão Principal: Confirmar Presença (Upvote)
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 4,
+                shadowColor: const Color(0xFF2563EB).withValues(alpha: 0.4),
+              ),
+              icon: const Icon(Icons.thumb_up_rounded, size: 20),
+              label: const Text(
+                'Sim, ainda está lá! (Confirmar)',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              ),
+              onPressed: () {
+                Navigator.pop(context);
+                onConfirmExisting();
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
 
         // Botão Secundário: Não está mais lá
         if (onNotThereAnymore != null) ...[

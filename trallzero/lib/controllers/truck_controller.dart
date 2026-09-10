@@ -44,11 +44,28 @@ class TruckController extends ChangeNotifier {
   List<TruckRoute> _availableRoutes = [];
   int _selectedRouteIndex = 0;
 
+  static const String _keyMyCreatedMarkers = 'my_created_markers';
+  static const String _keyMyConfirmedMarkers = 'my_confirmed_markers';
+
+  final Set<String> _myCreatedMarkerIds = {};
+  final Set<String> _myConfirmedMarkerIds = {};
+
+  Set<String> get myCreatedMarkerIds => Set.unmodifiable(_myCreatedMarkerIds);
+  Set<String> get myConfirmedMarkerIds => Set.unmodifiable(_myConfirmedMarkerIds);
+
   TruckController() {
     _init();
   }
 
   Future<void> _init() async {
+    try {
+      final prefs = PreferencesService.instance.prefs;
+      final created = prefs.getStringList(_keyMyCreatedMarkers) ?? [];
+      final confirmed = prefs.getStringList(_keyMyConfirmedMarkers) ?? [];
+      _myCreatedMarkerIds.addAll(created);
+      _myConfirmedMarkerIds.addAll(confirmed);
+    } catch (_) {}
+
     await loadMarkers();
     await restoreRoute();
   }
@@ -785,22 +802,63 @@ class TruckController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Verifica se o marcador foi criado pelo usuário atual
+  bool isMarkerAuthor(TruckerMarker marker) {
+    final currentUserId = ApiService.instance.userId;
+    if (currentUserId != null && marker.authorId != null && marker.authorId == currentUserId) {
+      return true;
+    }
+    return _myCreatedMarkerIds.contains(marker.id);
+  }
+
+  /// Verifica se o usuário atual já confirmou presença neste marcador
+  bool hasConfirmedMarker(TruckerMarker marker) {
+    if (_myConfirmedMarkerIds.contains(marker.id)) {
+      return true;
+    }
+    final currentUserId = ApiService.instance.userId;
+    if (currentUserId != null && marker.validatedUserIds.contains(currentUserId)) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Verifica se o usuário tem permissão para confirmar o marcador
+  bool canConfirmMarker(TruckerMarker marker) {
+    return !isMarkerAuthor(marker) && !hasConfirmedMarker(marker);
+  }
+
+  void _persistMarkerLists() {
+    try {
+      final prefs = PreferencesService.instance.prefs;
+      prefs.setStringList(_keyMyCreatedMarkers, _myCreatedMarkerIds.toList());
+      prefs.setStringList(_keyMyConfirmedMarkers, _myConfirmedMarkerIds.toList());
+    } catch (_) {}
+  }
+
   Future<void> addMarker(
     LatLng point,
     MarkerType type,
     String description, {
     double? heading,
   }) async {
+    final markerId = DateTime.now().millisecondsSinceEpoch.toString();
+    final currentUserId = ApiService.instance.userId;
+
     final marker = TruckerMarker(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: markerId,
       position: point,
       type: type,
       description: description,
       heading: heading,
       confirmations: 1,
+      authorId: currentUserId,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
+
+    _myCreatedMarkerIds.add(markerId);
+    _persistMarkerLists();
 
     try {
       final success = await ApiService.instance.postAlert(marker);
@@ -822,11 +880,38 @@ class TruckController extends ChangeNotifier {
 
   /// Confirma que um alerta ainda está ativo no local (Padrão Waze / Upvote)
   Future<bool> confirmMarker(String id) async {
-    final idx = _customMarkers.indexWhere((m) => m.id == id);
-    if (idx != -1) {
-      final m = _customMarkers[idx];
-      _customMarkers[idx] = m.copyWith(
-        confirmations: m.confirmations + 1,
+    TruckerMarker? target;
+    int customIdx = _customMarkers.indexWhere((m) => m.id == id);
+    if (customIdx != -1) {
+      target = _customMarkers[customIdx];
+    } else {
+      int autoIdx = _automaticPOIs.indexWhere((m) => m.id == id);
+      if (autoIdx != -1) {
+        target = _automaticPOIs[autoIdx];
+      }
+    }
+
+    if (target == null) return false;
+
+    // Se for o autor ou já confirmou, bloqueia!
+    if (!canConfirmMarker(target)) {
+      debugPrint('Ação bloqueada: usuário é autor ou já confirmou o alerta $id');
+      return false;
+    }
+
+    _myConfirmedMarkerIds.add(id);
+    _persistMarkerLists();
+
+    final currentUserId = ApiService.instance.userId;
+    final updatedValidatedList = List<int>.from(target.validatedUserIds);
+    if (currentUserId != null && !updatedValidatedList.contains(currentUserId)) {
+      updatedValidatedList.add(currentUserId);
+    }
+
+    if (customIdx != -1) {
+      _customMarkers[customIdx] = target.copyWith(
+        confirmations: target.confirmations + 1,
+        validatedUserIds: updatedValidatedList,
         updatedAt: DateTime.now(),
       );
       notifyListeners();
@@ -835,9 +920,9 @@ class TruckController extends ChangeNotifier {
 
     final autoIdx = _automaticPOIs.indexWhere((m) => m.id == id);
     if (autoIdx != -1) {
-      final m = _automaticPOIs[autoIdx];
-      _automaticPOIs[autoIdx] = m.copyWith(
-        confirmations: m.confirmations + 1,
+      _automaticPOIs[autoIdx] = target.copyWith(
+        confirmations: target.confirmations + 1,
+        validatedUserIds: updatedValidatedList,
         updatedAt: DateTime.now(),
       );
       notifyListeners();

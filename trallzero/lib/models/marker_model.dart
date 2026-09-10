@@ -26,6 +26,7 @@ class TruckerMarker {
   final int? authorId;
   final String? authorName;
   final int? authorXp;
+  final List<int> validatedUserIds; // IDs dos usuários que já confirmaram presença
 
   TruckerMarker({
     required this.id,
@@ -39,6 +40,7 @@ class TruckerMarker {
     this.authorId,
     this.authorName,
     this.authorXp,
+    this.validatedUserIds = const [],
   });
 
   TruckerMarker copyWith({
@@ -53,6 +55,7 @@ class TruckerMarker {
     int? authorId,
     String? authorName,
     int? authorXp,
+    List<int>? validatedUserIds,
   }) {
     return TruckerMarker(
       id: id ?? this.id,
@@ -66,6 +69,7 @@ class TruckerMarker {
       authorId: authorId ?? this.authorId,
       authorName: authorName ?? this.authorName,
       authorXp: authorXp ?? this.authorXp,
+      validatedUserIds: validatedUserIds ?? this.validatedUserIds,
     );
   }
 
@@ -77,6 +81,7 @@ class TruckerMarker {
       'type': type.name,
       'description': description,
       'confirmations': confirmations,
+      'validatedUserIds': validatedUserIds,
     };
     if (heading != null) map['heading'] = heading;
     if (createdAt != null) map['createdAt'] = createdAt!.toIso8601String();
@@ -109,6 +114,11 @@ class TruckerMarker {
       authorId: map['authorId'] != null ? (map['authorId'] as num).toInt() : null,
       authorName: map['authorName'] as String?,
       authorXp: map['authorXp'] != null ? (map['authorXp'] as num).toInt() : null,
+      validatedUserIds: map['validatedUserIds'] != null
+          ? (map['validatedUserIds'] as List)
+              .map((e) => (e as num).toInt())
+              .toList()
+          : const [],
     );
   }
 }

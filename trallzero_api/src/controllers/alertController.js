@@ -11,7 +11,7 @@ export const createAlert = async (req, res) => {
 
     // Busca se já existe um alerta do mesmo tipo dentro do raio
     const nearbyAlerts = await prisma.$queryRaw`
-      SELECT id, latitude, longitude 
+      SELECT id, latitude, longitude, "userId" 
       FROM "Alert"
       WHERE "type"::text = ${type}
         AND (
@@ -24,32 +24,34 @@ export const createAlert = async (req, res) => {
       LIMIT 1;
     `;
 
+    const parsedUserId = userId ? parseInt(userId) : null;
+
     // Se encontramos um alerta idêntico por perto...
     if (nearbyAlerts.length > 0) {
       const existingAlert = nearbyAlerts[0];
+      const isOwner = parsedUserId != null && existingAlert.userId === parsedUserId;
 
-      // Em vez de duplicar, adiciona uma validação (voto positivo)
-      // Verifica se este usuário já votou nesse alerta antes
-      const existingValidation = await prisma.validation.findFirst({
-        where: {
-          userId: userId,
-          alertId: existingAlert.id,
-        }
-      });
-
-      if (!existingValidation) {
-        await prisma.validation.create({
-          data: {
-            isHelpful: true,
-            userId: userId,
+      // Se o alerta existente NÃO foi criado por ele, verifica se pode validar
+      if (!isOwner && parsedUserId != null) {
+        const existingValidation = await prisma.validation.findFirst({
+          where: {
+            userId: parsedUserId,
             alertId: existingAlert.id,
           }
         });
 
-        // Pontua o usuário que confirmou presença (+5 XP)
-        if (userId) {
+        if (!existingValidation) {
+          await prisma.validation.create({
+            data: {
+              isHelpful: true,
+              userId: parsedUserId,
+              alertId: existingAlert.id,
+            }
+          });
+
+          // Pontua o usuário que confirmou presença (+5 XP)
           await prisma.user.update({
-            where: { id: parseInt(userId) },
+            where: { id: parsedUserId },
             data: {
               xp: { increment: 5 },
               confirmationsCount: { increment: 1 },
@@ -63,15 +65,19 @@ export const createAlert = async (req, res) => {
         where: { id: existingAlert.id },
         include: {
           user: { select: { id: true, name: true, xp: true } },
+          validations: { select: { userId: true } },
           _count: { select: { validations: true } }
         }
       });
 
       return res.status(200).json({ 
         success: true, 
-        message: 'Alerta próximo já existente. Adicionada nova validação!',
+        message: isOwner 
+          ? 'Você já reportou um alerta semelhante neste local.' 
+          : 'Alerta próximo já existente. Validação processada!',
         data: fullAlert,
-        merged: true
+        merged: true,
+        isOwner: isOwner,
       });
     }
 
@@ -82,19 +88,20 @@ export const createAlert = async (req, res) => {
         latitude,
         longitude,
         description,
-        userId,
+        userId: parsedUserId,
       },
       include: {
         user: { select: { id: true, name: true, xp: true } },
+        validations: { select: { userId: true } },
         _count: { select: { validations: true } }
       }
     });
 
     // Pontua o criador do novo alerta (+10 XP)
     let updatedUser = null;
-    if (userId) {
+    if (parsedUserId) {
       updatedUser = await prisma.user.update({
-        where: { id: parseInt(userId) },
+        where: { id: parsedUserId },
         data: {
           xp: { increment: 10 },
           reportsCount: { increment: 1 },
@@ -125,6 +132,7 @@ export const getAlerts = async (req, res) => {
     const alerts = await prisma.alert.findMany({
       include: {
         user: { select: { id: true, name: true, xp: true } }, // Traz quem criou o alerta com o XP
+        validations: { select: { userId: true } }, // Usuários que já confirmaram
         _count: { select: { validations: true } } // Quantidade de votos/validações
       }
     });
@@ -143,7 +151,28 @@ export const validateAlert = async (req, res) => {
     const alertId = parseInt(id);
     const parsedUserId = parseInt(userId);
 
-    // Evita voto duplicado do mesmo usuário no mesmo alerta
+    // 1) Busca o alerta para verificar existência e autoria
+    const alert = await prisma.alert.findUnique({
+      where: { id: alertId }
+    });
+
+    if (!alert) {
+      return res.status(404).json({
+        success: false,
+        message: 'Alerta não encontrado.',
+      });
+    }
+
+    // 2) Não permite que o criador confirme o próprio alerta
+    if (alert.userId === parsedUserId) {
+      return res.status(400).json({
+        success: false,
+        isOwner: true,
+        message: 'Você não pode confirmar seu próprio alerta.',
+      });
+    }
+
+    // 3) Evita voto duplicado do mesmo usuário no mesmo alerta
     const existing = await prisma.validation.findFirst({
       where: {
         userId: parsedUserId,
@@ -152,11 +181,11 @@ export const validateAlert = async (req, res) => {
     });
 
     if (existing) {
-      return res.status(200).json({
-        success: true,
+      return res.status(400).json({
+        success: false,
+        alreadyValidated: true,
         message: 'Você já confirmou este alerta anteriormente.',
         data: existing,
-        alreadyValidated: true,
       });
     }
     
