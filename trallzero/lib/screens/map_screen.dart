@@ -34,6 +34,7 @@ import '../services/user_score_service.dart';
 import '../widgets/score_earned_overlay.dart';
 import '../models/user_rank.dart';
 import '../services/api_service.dart';
+import '../services/tts_service.dart';
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -134,6 +135,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   int _offRouteCount = 0;
   bool _isRecalculating = false;
   bool _showReroutingBanner = false;
+
+  // --- Alertas sonoros de marcadores (estilo Waze) ---
+  // IDs de marcadores cujo aviso de voz já foi disparado nesta passagem
+  final Set<String> _announcedMarkerIds = {};
+  // IDs de marcadores que o usuário já passou (< 80 m) → permite reanunciar ao voltar
+  final Set<String> _markerPassedIds = {};
 
   // --- Altura atual do NavigationPanel (para evitar sobreposição dos botões) ---
   // Vai de 0.0 (sem painel) ao fractal do DraggableScrollableSheet
@@ -331,6 +338,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _lastKnownSpeed = speed;
         _gpsAccuracy = position.accuracy;
       });
+
+      // ── Alertas sonoros de marcadores (estilo Waze) ───────────────────────
+      _checkMarkerProximityAlerts(
+        newPos,
+        [...truckController.customMarkers, ...truckController.automaticPOIs],
+        speed,
+      );
 
       final gpsHeading = _safeGpsHeading(position);
       final bool useGpsHeading =
@@ -747,6 +761,84 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     return (bestProjection, bestDist, bestSegmentIndex);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  ALERTAS SONOROS DE MARCADORES (estilo Waze)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Tipos de marcadores que merecem alerta sonoro proativo.
+  static const _ttsAlertTypes = {
+    MarkerType.restriction,
+    MarkerType.weighStation,
+    MarkerType.police,
+    MarkerType.danger,
+    MarkerType.speedCamera,
+    MarkerType.loading,
+    MarkerType.parking,
+    MarkerType.gasStation,
+    MarkerType.mechanic,
+    MarkerType.restaurant,
+  };
+
+  /// Distância a que o alerta é disparado, adaptada à velocidade do veículo.
+  /// Mais rápido → raio maior para dar tempo de reação.
+  double _alertRadius(double speedMs) {
+    final kmh = speedMs * 3.6;
+    if (kmh > 60) return 500.0;
+    if (kmh > 20) return 350.0;
+    return 200.0;
+  }
+
+  /// Verifica proximidade de todos os marcadores críticos e aciona o TTS
+  /// quando o usuário entra no raio adaptativo de alerta.
+  void _checkMarkerProximityAlerts(
+    LatLng pos,
+    List<TruckerMarker> markers,
+    double speedMs,
+  ) {
+    if (markers.isEmpty) return;
+
+    final dist = const Distance();
+    final radius = _alertRadius(speedMs);
+    const double passedThreshold = 80.0; // "já passou" — remove do set anunciado
+
+    for (final marker in markers) {
+      if (!_ttsAlertTypes.contains(marker.type)) continue;
+
+      final d = dist.as(LengthUnit.Meter, pos, marker.position);
+
+      // ── Passou pelo marcador → limpa flags para permitir reanunciar ──────
+      if (d < passedThreshold) {
+        if (_announcedMarkerIds.remove(marker.id)) {
+          _markerPassedIds.add(marker.id);
+        }
+        continue;
+      }
+
+      // Se saiu da zona de "passou", limpa o flag de passagem
+      if (d > passedThreshold * 2) {
+        _markerPassedIds.remove(marker.id);
+      }
+
+      // ── Dentro do raio de alerta e ainda não anunciado ───────────────────
+      if (d <= radius && !_announcedMarkerIds.contains(marker.id)) {
+        _announcedMarkerIds.add(marker.id);
+
+        // Monta o label de distância legível
+        final distLabel = d >= 1000
+            ? '${(d / 1000).toStringAsFixed(1).replaceAll('.', ',')} quilômetros'
+            : '${d.toInt()} metros';
+
+        TtsService.instance.speakMarkerAlert(
+          marker.type,
+          distanceLabel: distLabel,
+        );
+
+        // Só anuncia o marcador mais urgente por vez (respeita o cooldown do TtsService)
+        break;
+      }
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1891,17 +1983,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       final color = _markerColor(m.type);
                       final label = _markerLabel(m.type);
 
-                      // Escala adaptativa ao zoom (estilo Waze):
-                      // zoom ≤ 12 → 50%; zoom ≥ 15 → 100%
-                      final double scaleFactor =
-                          ((_currentZoom - 12.0) / 3.0).clamp(0.5, 1.0);
                       final bool showLabel = _currentZoom >= 15.0;
 
                       return Marker(
                         point: m.position,
-                        width: 48 * scaleFactor,
-                        height:
-                            showLabel ? 70 * scaleFactor : 48 * scaleFactor,
+                        width: showLabel ? 52 : 42,
+                        height: showLabel ? 72 : 48,
                         rotate: true,
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 250),
@@ -1912,10 +1999,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             ignoring: _currentZoom < _markerVisibilityZoom,
                             child: GestureDetector(
                               onTap: () => _showMarkerDetailSheet(m),
-                              child: AnimatedScale(
-                                scale: scaleFactor,
-                                duration: const Duration(milliseconds: 200),
-                                alignment: Alignment.bottomCenter,
+                              // FittedBox participa do layout e escala o conteúdo
+                              // para caber exatamente na caixa do Marker — sem overflow.
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.topCenter,
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment:
