@@ -95,6 +95,14 @@ class ApiService {
               ? (count['validations'] as num).toInt()
               : 1;
 
+          final List? validations = a['validations'] as List?;
+          final validatedUserIds = validations != null
+              ? validations
+                  .where((v) => v != null && v['userId'] != null)
+                  .map((v) => (v['userId'] as num).toInt())
+                  .toList()
+              : <int>[];
+
           return TruckerMarker(
             id: a['id'].toString(),
             position: LatLng(
@@ -107,6 +115,7 @@ class ApiService {
             authorId: user != null ? (user['id'] as num?)?.toInt() : null,
             authorName: user != null ? user['name'] as String? : null,
             authorXp: user != null && user['xp'] != null ? (user['xp'] as num).toInt() : 0,
+            validatedUserIds: validatedUserIds,
           );
         }).toList();
       }
@@ -160,8 +169,9 @@ class ApiService {
         }),
       );
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode == 200 || response.statusCode == 201 || response.statusCode == 400) {
+        return body;
       } else {
         debugPrint('Falha ao validar alerta: ${response.body}');
       }

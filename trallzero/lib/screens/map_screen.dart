@@ -34,6 +34,7 @@ import '../services/user_score_service.dart';
 import '../widgets/score_earned_overlay.dart';
 import '../models/user_rank.dart';
 import '../services/api_service.dart';
+import '../services/tts_service.dart';
 
 // ============================================================
 // COMO FUNCIONA A ROTAÇÃO:
@@ -134,6 +135,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   int _offRouteCount = 0;
   bool _isRecalculating = false;
   bool _showReroutingBanner = false;
+
+  // --- Alertas sonoros de marcadores (estilo Waze) ---
+  // IDs de marcadores cujo aviso de voz já foi disparado nesta passagem
+  final Set<String> _announcedMarkerIds = {};
+  // IDs de marcadores que o usuário já passou (< 80 m) → permite reanunciar ao voltar
+  final Set<String> _markerPassedIds = {};
 
   // --- Altura atual do NavigationPanel (para evitar sobreposição dos botões) ---
   // Vai de 0.0 (sem painel) ao fractal do DraggableScrollableSheet
@@ -331,6 +338,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         _lastKnownSpeed = speed;
         _gpsAccuracy = position.accuracy;
       });
+
+      // ── Alertas sonoros de marcadores (estilo Waze) ───────────────────────
+      _checkMarkerProximityAlerts(
+        newPos,
+        [...truckController.customMarkers, ...truckController.automaticPOIs],
+        speed,
+      );
 
       final gpsHeading = _safeGpsHeading(position);
       final bool useGpsHeading =
@@ -747,6 +761,84 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     return (bestProjection, bestDist, bestSegmentIndex);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  ALERTAS SONOROS DE MARCADORES (estilo Waze)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Tipos de marcadores que merecem alerta sonoro proativo.
+  static const _ttsAlertTypes = {
+    MarkerType.restriction,
+    MarkerType.weighStation,
+    MarkerType.police,
+    MarkerType.danger,
+    MarkerType.speedCamera,
+    MarkerType.loading,
+    MarkerType.parking,
+    MarkerType.gasStation,
+    MarkerType.mechanic,
+    MarkerType.restaurant,
+  };
+
+  /// Distância a que o alerta é disparado, adaptada à velocidade do veículo.
+  /// Mais rápido → raio maior para dar tempo de reação.
+  double _alertRadius(double speedMs) {
+    final kmh = speedMs * 3.6;
+    if (kmh > 60) return 500.0;
+    if (kmh > 20) return 350.0;
+    return 200.0;
+  }
+
+  /// Verifica proximidade de todos os marcadores críticos e aciona o TTS
+  /// quando o usuário entra no raio adaptativo de alerta.
+  void _checkMarkerProximityAlerts(
+    LatLng pos,
+    List<TruckerMarker> markers,
+    double speedMs,
+  ) {
+    if (markers.isEmpty) return;
+
+    final dist = const Distance();
+    final radius = _alertRadius(speedMs);
+    const double passedThreshold = 80.0; // "já passou" — remove do set anunciado
+
+    for (final marker in markers) {
+      if (!_ttsAlertTypes.contains(marker.type)) continue;
+
+      final d = dist.as(LengthUnit.Meter, pos, marker.position);
+
+      // ── Passou pelo marcador → limpa flags para permitir reanunciar ──────
+      if (d < passedThreshold) {
+        if (_announcedMarkerIds.remove(marker.id)) {
+          _markerPassedIds.add(marker.id);
+        }
+        continue;
+      }
+
+      // Se saiu da zona de "passou", limpa o flag de passagem
+      if (d > passedThreshold * 2) {
+        _markerPassedIds.remove(marker.id);
+      }
+
+      // ── Dentro do raio de alerta e ainda não anunciado ───────────────────
+      if (d <= radius && !_announcedMarkerIds.contains(marker.id)) {
+        _announcedMarkerIds.add(marker.id);
+
+        // Monta o label de distância legível
+        final distLabel = d >= 1000
+            ? '${(d / 1000).toStringAsFixed(1).replaceAll('.', ',')} quilômetros'
+            : '${d.toInt()} metros';
+
+        TtsService.instance.speakMarkerAlert(
+          marker.type,
+          distanceLabel: distLabel,
+        );
+
+        // Só anuncia o marcador mais urgente por vez (respeita o cooldown do TtsService)
+        break;
+      }
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1215,6 +1307,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     // Se já existir alerta no raio com mesmo sentido, abre o MarkerConflictSheet
+    final existingMarker = result.existingMarker;
+    final isAuthor = existingMarker != null && tc.isMarkerAuthor(existingMarker);
+    final hasConfirmed = existingMarker != null && tc.hasConfirmedMarker(existingMarker);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1222,11 +1318,44 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       builder: (ctx) => MarkerConflictSheet(
         result: result,
         proposedType: type,
+        isAuthor: isAuthor,
+        hasConfirmed: hasConfirmed,
         onConfirmExisting: () async {
-          await tc.confirmMarker(result.existingMarker!.id);
-          final scoreEvent =
-              await UserScoreService.instance.addScoreForConfirmation();
-          if (mounted) {
+          if (existingMarker == null) return;
+          final success = await tc.confirmMarker(existingMarker.id);
+          if (!success) return;
+
+          // Validação remota na API
+          final alertId = int.tryParse(existingMarker.id);
+          ScoreEvent? scoreEvent;
+          bool apiHandled = false;
+
+          if (alertId != null) {
+            final apiRes = await ApiService.instance
+                .validateAlert(alertId, isHelpful: true);
+            if (apiRes != null) {
+              apiHandled = true;
+              if (apiRes['alreadyValidated'] == true || apiRes['isOwner'] == true) {
+                return;
+              }
+              if (apiRes['userScore'] != null) {
+                scoreEvent = await UserScoreService.instance.applyRemoteScore(
+                  apiRes['userScore'] as Map<String, dynamic>,
+                  pointsEarned:
+                      (apiRes['xpEarned'] as num?)?.toInt() ??
+                          UserScoreService.xpForConfirmation,
+                  reason: 'Presença Confirmada!',
+                );
+              }
+            }
+          }
+
+          if (!apiHandled) {
+            scoreEvent = await UserScoreService.instance
+                .addScoreForConfirmation();
+          }
+
+          if (mounted && scoreEvent != null) {
             ScoreEarnedOverlay.show(context, scoreEvent);
           }
         },
@@ -1279,6 +1408,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   void _showMarkerDetailSheet(TruckerMarker marker) {
     final color = _markerColor(marker.type);
+    final tc = context.read<TruckController>();
+    final isAuthor = tc.isMarkerAuthor(marker);
+    final hasConfirmed = tc.hasConfirmedMarker(marker);
+    final canConfirm = tc.canConfirmMarker(marker);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF111318),
@@ -1469,55 +1603,140 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 18),
-            // Botão Confirmar Presença (Upvote)
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+            // Se o usuário for o autor do alerta
+            if (isAuthor) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.35),
+                    width: 1,
                   ),
-                  elevation: 0,
                 ),
-                icon: const Icon(Icons.thumb_up_rounded, size: 18),
-                label: const Text(
-                  'Confirmar Presença (Sim, continua lá)',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.person_pin_circle_rounded,
+                      color: Color(0xFF60A5FA),
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Você reportou este alerta',
+                      style: TextStyle(
+                        color: Color(0xFF93C5FD),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
-                onPressed: () async {
-                  context.read<TruckController>().confirmMarker(marker.id);
-                  Navigator.pop(ctx);
-
-                  // Validação remota na API
-                  final alertId = int.tryParse(marker.id);
-                  ScoreEvent? scoreEvent;
-                  if (alertId != null) {
-                    final apiRes = await ApiService.instance
-                        .validateAlert(alertId, isHelpful: true);
-                    if (apiRes != null && apiRes['userScore'] != null) {
-                      scoreEvent = await UserScoreService.instance.applyRemoteScore(
-                        apiRes['userScore'] as Map<String, dynamic>,
-                        pointsEarned:
-                            (apiRes['xpEarned'] as num?)?.toInt() ??
-                                UserScoreService.xpForConfirmation,
-                        reason: 'Presença Confirmada!',
-                      );
-                    }
-                  }
-
-                  // Fallback local se a API estiver offline
-                  scoreEvent ??= await UserScoreService.instance
-                      .addScoreForConfirmation();
-
-                  if (mounted) {
-                    ScoreEarnedOverlay.show(context, scoreEvent);
-                  }
-                },
               ),
-            ),
+            ] else if (hasConfirmed) ...[
+              // Se o usuário já confirmou presença anteriormente
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF34C759).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFF34C759).withValues(alpha: 0.35),
+                    width: 1,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.check_circle_rounded,
+                      color: Color(0xFF34C759),
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Presença já confirmada por você',
+                      style: TextStyle(
+                        color: Color(0xFF34C759),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (canConfirm) ...[
+              // Botão Confirmar Presença (Upvote) - Apenas motoristas que não são autores e não confirmaram
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                  icon: const Icon(Icons.thumb_up_rounded, size: 18),
+                  label: const Text(
+                    'Confirmar Presença (Sim, continua lá)',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                  ),
+                  onPressed: () async {
+                    final success = await context
+                        .read<TruckController>()
+                        .confirmMarker(marker.id);
+                    if (!context.mounted) return;
+                    Navigator.pop(ctx);
+
+                    if (!success) return;
+
+                    // Validação remota na API
+                    final alertId = int.tryParse(marker.id);
+                    ScoreEvent? scoreEvent;
+                    bool apiHandled = false;
+
+                    if (alertId != null) {
+                      final apiRes = await ApiService.instance
+                          .validateAlert(alertId, isHelpful: true);
+                      if (apiRes != null) {
+                        apiHandled = true;
+                        if (apiRes['alreadyValidated'] == true ||
+                            apiRes['isOwner'] == true) {
+                          return;
+                        }
+                        if (apiRes['userScore'] != null) {
+                          scoreEvent = await UserScoreService.instance
+                              .applyRemoteScore(
+                            apiRes['userScore'] as Map<String, dynamic>,
+                            pointsEarned:
+                                (apiRes['xpEarned'] as num?)?.toInt() ??
+                                    UserScoreService.xpForConfirmation,
+                            reason: 'Presença Confirmada!',
+                          );
+                        }
+                      }
+                    }
+
+                    // Fallback local se a API estiver offline
+                    if (!apiHandled) {
+                      scoreEvent = await UserScoreService.instance
+                          .addScoreForConfirmation();
+                    }
+
+                    if (mounted && scoreEvent != null) {
+                      ScoreEarnedOverlay.show(context, scoreEvent);
+                    }
+                  },
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             // Botão deletar
             SizedBox(
@@ -1725,9 +1944,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: const Color(
-                                      0xFF34C759,
-                                    ).withValues(alpha: 0.55),
+                                    color: const Color(0xFF34C759).withValues(alpha: 0.55),
                                     blurRadius: 12,
                                     spreadRadius: 1,
                                     offset: const Offset(0, 3),
@@ -1765,10 +1982,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     ...[...tc.customMarkers, ...tc.automaticPOIs].map((m) {
                       final color = _markerColor(m.type);
                       final label = _markerLabel(m.type);
+
+                      final bool showLabel = _currentZoom >= 15.0;
+
                       return Marker(
                         point: m.position,
-                        width: 84,
-                        height: 72,
+                        width: showLabel ? 52 : 42,
+                        height: showLabel ? 72 : 48,
                         rotate: true,
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 250),
@@ -1779,64 +1999,90 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             ignoring: _currentZoom < _markerVisibilityZoom,
                             child: GestureDetector(
                               onTap: () => _showMarkerDetailSheet(m),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // ── Ícone ──
-                                  Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: color.withValues(alpha: 0.18),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: color.withValues(alpha: 0.55),
-                                        width: 1.5,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: color.withValues(alpha: 0.25),
-                                          blurRadius: 8,
-                                          offset: const Offset(0, 3),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Icon(
-                                      _markerIcon(m.type),
-                                      color: color,
-                                      size: 22,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  // ── Label ──
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(
-                                        0xFF0B0E17,
-                                      ).withValues(alpha: 0.82),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: color.withValues(alpha: 0.3),
-                                        width: 0.8,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      label,
-                                      style: TextStyle(
+                              // FittedBox participa do layout e escala o conteúdo
+                              // para caber exatamente na caixa do Marker — sem overflow.
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.topCenter,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.center,
+                                  children: [
+                                    // ── Pin circular compacto (estilo Waze) ──
+                                    Container(
+                                      width: 38,
+                                      height: 38,
+                                      decoration: BoxDecoration(
                                         color: color,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.3,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.9),
+                                          width: 2.5,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                color.withValues(alpha: 0.45),
+                                            blurRadius: 10,
+                                            spreadRadius: 0,
+                                            offset: const Offset(0, 3),
+                                          ),
+                                          BoxShadow(
+                                            color: Colors.black
+                                                .withValues(alpha: 0.25),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                      child: Icon(
+                                        _markerIcon(m.type),
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    // ── Pontinha triangular ──
+                                    CustomPaint(
+                                      size: const Size(10, 7),
+                                      painter:
+                                          _PinPointerPainter(color: color),
+                                    ),
+                                    // ── Label só aparece em zoom ≥ 15 ──
+                                    if (showLabel) ...[
+                                      const SizedBox(height: 2),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 5,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF0B0E17)
+                                              .withValues(alpha: 0.88),
+                                          borderRadius:
+                                              BorderRadius.circular(5),
+                                          border: Border.all(
+                                            color:
+                                                color.withValues(alpha: 0.45),
+                                            width: 0.8,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          label,
+                                          style: TextStyle(
+                                            color: color,
+                                            fontSize: 8.5,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.2,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),

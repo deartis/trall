@@ -14,10 +14,47 @@ class RoadAnalysisService {
   final Distance _distance = const Distance();
 
   RoadHazardLevel classifySlope(double slopePercent) {
-    if (slopePercent <= 6.0) return RoadHazardLevel.safe;
-    if (slopePercent <= 10.0) return RoadHazardLevel.attention;
-    if (slopePercent <= 15.0) return RoadHazardLevel.heavy;
+    final absSlope = slopePercent.abs();
+    if (absSlope <= 6.0) return RoadHazardLevel.safe;
+    if (absSlope <= 10.0) return RoadHazardLevel.attention;
+    if (absSlope <= 15.0) return RoadHazardLevel.heavy;
     return RoadHazardLevel.avoid;
+  }
+
+  List<double> smoothElevations(
+    List<LatLng> points,
+    List<double> rawElevations, {
+    double windowMeters = 80.0,
+  }) {
+    if (rawElevations.length <= 2) return rawElevations.toList();
+    final smoothed = List<double>.filled(rawElevations.length, 0.0);
+
+    for (var i = 0; i < rawElevations.length; i++) {
+      var weightSum = 1.0;
+      var elevationSum = rawElevations[i];
+
+      // Janela para trás
+      for (var j = i - 1; j >= 0; j--) {
+        final dist = _distance.as(LengthUnit.Meter, points[i], points[j]);
+        if (dist > windowMeters) break;
+        final weight = 1.0 - (dist / windowMeters);
+        elevationSum += rawElevations[j] * weight;
+        weightSum += weight;
+      }
+
+      // Janela para a frente
+      for (var j = i + 1; j < rawElevations.length; j++) {
+        final dist = _distance.as(LengthUnit.Meter, points[i], points[j]);
+        if (dist > windowMeters) break;
+        final weight = 1.0 - (dist / windowMeters);
+        elevationSum += rawElevations[j] * weight;
+        weightSum += weight;
+      }
+
+      smoothed[i] = weightSum > 0 ? elevationSum / weightSum : rawElevations[i];
+    }
+
+    return smoothed;
   }
 
   Future<List<RoadSegmentAnalysis>> analyzeSlopeSegments(
@@ -27,7 +64,8 @@ class RoadAnalysisService {
     final cleanedPoints = routePoints.toList();
     if (cleanedPoints.length < 2) return [];
 
-    final elevations = await ElevationService.instance.getElevations(cleanedPoints);
+    final rawElevations = await ElevationService.instance.getElevations(cleanedPoints);
+    final elevations = smoothElevations(cleanedPoints, rawElevations, windowMeters: 80.0);
     final segments = <RoadSegmentAnalysis>[];
 
     for (var i = 0; i < cleanedPoints.length - 1; i++) {
