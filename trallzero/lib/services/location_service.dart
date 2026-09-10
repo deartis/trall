@@ -22,7 +22,7 @@ class LocationService {
   static Stream<Position> getPositionStream() {
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 1,
+      distanceFilter: 3, // Reduz burst de eventos GPS sem impacto na precisão de navegação
     );
     return Geolocator.getPositionStream(locationSettings: locationSettings);
   }

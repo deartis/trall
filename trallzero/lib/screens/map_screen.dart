@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:math' as math;
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
@@ -58,6 +59,57 @@ import '../services/tts_service.dart';
 /// Obtenha uma chave gratuita (5 milhões reqs/mês) em: https://carto.com/basemaps/apikey
 /// Deixe vazia para usar o OpenStreetMap oficial com Dark Mode sem exigir chave de API.
 const String kCartoApiKey = '';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Função top-level para uso com compute() — executa o snap de rota em isolate
+// separado, libertando a UI thread e eliminando o jank durante a navegação.
+// Deve ficar FORA da classe pois compute() exige função top-level ou static.
+// ─────────────────────────────────────────────────────────────────────────────
+(LatLng, double, int) _snapToRouteSegmentIsolate(
+  ({LatLng rawPos, List<LatLng> route}) input,
+) {
+  final rawPos = input.rawPos;
+  final route = input.route;
+
+  LatLng bestProjection = route.first;
+  double bestDist = double.infinity;
+  int bestSegmentIndex = 0;
+
+  for (int i = 0; i < route.length - 1; i++) {
+    final a = route[i];
+    final b = route[i + 1];
+
+    final ax = a.longitude;
+    final ay = a.latitude;
+    final bx = b.longitude;
+    final by = b.latitude;
+    final px = rawPos.longitude;
+    final py = rawPos.latitude;
+
+    final abx = bx - ax;
+    final aby = by - ay;
+    final len2 = abx * abx + aby * aby;
+
+    double t = 0;
+    if (len2 > 0) {
+      t = ((px - ax) * abx + (py - ay) * aby) / len2;
+      t = t.clamp(0.0, 1.0);
+    }
+
+    final projLat = ay + t * aby;
+    final projLng = ax + t * abx;
+    final proj = LatLng(projLat, projLng);
+
+    final d = const Distance().as(LengthUnit.Meter, rawPos, proj);
+    if (d < bestDist) {
+      bestDist = d;
+      bestProjection = proj;
+      bestSegmentIndex = i;
+    }
+  }
+
+  return (bestProjection, bestDist, bestSegmentIndex);
+}
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -141,6 +193,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final Set<String> _announcedMarkerIds = {};
   // IDs de marcadores que o usuário já passou (< 80 m) → permite reanunciar ao voltar
   final Set<String> _markerPassedIds = {};
+  // Throttle para verificação de alertas — evita iterar todos os markers a cada GPS event
+  DateTime? _lastAlertCheckTime;
 
   // --- Altura atual do NavigationPanel (para evitar sobreposição dos botões) ---
   // Vai de 0.0 (sem painel) ao fractal do DraggableScrollableSheet
@@ -271,168 +325,188 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   void _startLocationUpdates() {
     _positionStream?.cancel();
-    _positionStream = LocationService.getPositionStream().listen((position) {
-      if (!mounted) return;
+    _positionStream = LocationService.getPositionStream().listen(_onGpsUpdate);
+  }
 
-      final rawPos = LatLng(position.latitude, position.longitude);
-      var newPos = rawPos;
-      final truckController = context.read<TruckController>();
-      final speed = _safeSpeed(position);
+  /// Processa cada update de GPS de forma assíncrona.
+  /// O snap de rota pesado roda em isolate separado via [compute] (rotas >100 pontos),
+  /// libertando a UI thread e eliminando o jank de 2-3 s durante a navegação.
+  Future<void> _onGpsUpdate(Position position) async {
+    if (!mounted) return;
 
-      if (truckController.isNavigating &&
-          truckController.routePoints.isNotEmpty) {
-        // Projeção no SEGMENTO mais próximo (em vez de vértice mais próximo).
-        // Isso garante movimento suave em curvas, eliminando o efeito de parar/pular.
-        final (snappedPos, minDist, segmentIndex) = _snapToRouteSegment(
-          rawPos,
-          truckController.routePoints,
-        );
-        const double snappingThreshold = 35.0;
+    final rawPos = LatLng(position.latitude, position.longitude);
+    var newPos = rawPos;
+    // Lê o controller ANTES do await — acesso a context não é seguro após suspend.
+    final truckController = context.read<TruckController>();
+    final speed = _safeSpeed(position);
 
-        if (minDist < snappingThreshold) {
-          newPos = snappedPos;
-          _offRouteCount = 0;
-          truckController.updateCurrentStep(
-            newPos,
-            speed: speed,
-            segmentIndex: segmentIndex,
-          ); // avança manobra e gerencia alertas de voz
-        } else {
-          if (position.accuracy <= 20.0) {
-            _offRouteCount++;
-            if (_offRouteCount >= 3 && !_isRecalculating) {
-              _triggerReroute(rawPos, truckController);
-            }
-          } else {
-            debugPrint(
-              '[Rerouting] Desvio ignorado devido a baixa precisão do GPS: ${position.accuracy}m',
-            );
+    if (truckController.isNavigating && truckController.routePoints.isNotEmpty) {
+      // Snapshot imutável da rota — evita race condition durante o await.
+      final routePoints = List<LatLng>.from(truckController.routePoints);
+
+      // Rotas longas (>100 pontos): snap em isolate separado para não bloquear UI.
+      // Rotas curtas: chamada direta (overhead do compute() não compensa).
+      final (snappedPos, minDist, segmentIndex) = routePoints.length > 100
+          ? await compute(
+              _snapToRouteSegmentIsolate,
+              (rawPos: rawPos, route: routePoints),
+            )
+          : _snapToRouteSegment(rawPos, routePoints);
+
+      if (!mounted) return; // Re-verifica após o await
+
+      const double snappingThreshold = 35.0;
+
+      if (minDist < snappingThreshold) {
+        newPos = snappedPos;
+        _offRouteCount = 0;
+        truckController.updateCurrentStep(
+          newPos,
+          speed: speed,
+          segmentIndex: segmentIndex,
+        ); // avança manobra e gerencia alertas de voz
+      } else {
+        if (position.accuracy <= 20.0) {
+          _offRouteCount++;
+          if (_offRouteCount >= 3 && !_isRecalculating) {
+            _triggerReroute(rawPos, truckController);
           }
-        }
-      }
-
-      // --- Cálculo da Duração Dinâmica Adaptativa ---
-      // Cobre TODO o intervalo do GPS (fator ~1.05) para a animação terminar
-      // exatamente quando o próximo update chegar — elimina a lacuna de freeze.
-      final now = DateTime.now();
-      if (_lastGpsUpdateTime != null) {
-        final elapsed = now.difference(_lastGpsUpdateTime!);
-        if (elapsed.inMilliseconds >= 150 && elapsed.inMilliseconds <= 2500) {
-          _animationDuration = Duration(
-            milliseconds: (elapsed.inMilliseconds * 1.05)
-                .clamp(250, 900)
-                .round(),
-          );
         } else {
-          _animationDuration = const Duration(milliseconds: 800);
+          debugPrint(
+            '[Rerouting] Desvio ignorado devido a baixa precisão do GPS: ${position.accuracy}m',
+          );
         }
       }
-      _lastGpsUpdateTime = now;
+    }
 
-      // Captura PRIMEIRO a posição visualmente renderizada (antes de qualquer setState)
-      // para que o novo tween comece exatamente onde a seta está na tela agora.
-      final livePos = _animatedPositionNotifier.value ?? _currentPosition ?? newPos;
+    // --- Cálculo da Duração Dinâmica Adaptativa ---
+    // Cobre TODO o intervalo do GPS (fator ~1.05) para a animação terminar
+    // exatamente quando o próximo update chegar — elimina a lacuna de freeze.
+    final now = DateTime.now();
+    if (_lastGpsUpdateTime != null) {
+      final elapsed = now.difference(_lastGpsUpdateTime!);
+      if (elapsed.inMilliseconds >= 150 && elapsed.inMilliseconds <= 2500) {
+        _animationDuration = Duration(
+          milliseconds: (elapsed.inMilliseconds * 1.05)
+              .clamp(250, 900)
+              .round(),
+        );
+      } else {
+        _animationDuration = const Duration(milliseconds: 800);
+      }
+    }
+    _lastGpsUpdateTime = now;
 
-      setState(() {
-        _currentPosition = newPos;
-        _lastKnownSpeed = speed;
-        _gpsAccuracy = position.accuracy;
-      });
+    // Captura PRIMEIRO a posição visualmente renderizada (antes de qualquer setState)
+    // para que o novo tween comece exatamente onde a seta está na tela agora.
+    final livePos = _animatedPositionNotifier.value ?? _currentPosition ?? newPos;
 
-      // ── Alertas sonoros de marcadores (estilo Waze) ───────────────────────
+    setState(() {
+      _currentPosition = newPos;
+      _lastKnownSpeed = speed;
+      _gpsAccuracy = position.accuracy;
+    });
+
+    // ── Alertas sonoros de marcadores (estilo Waze) ────────────────────────────
+    // Throttle de 500 ms: iterar todos os markers a cada GPS event causava jank
+    // perceptível. TTS tem cooldown de 30 s — sem perda funcional.
+    if (_lastAlertCheckTime == null ||
+        now.difference(_lastAlertCheckTime!) >=
+            const Duration(milliseconds: 500)) {
+      _lastAlertCheckTime = now;
       _checkMarkerProximityAlerts(
         newPos,
         [...truckController.customMarkers, ...truckController.automaticPOIs],
         speed,
       );
+    }
 
-      final gpsHeading = _safeGpsHeading(position);
-      final bool useGpsHeading =
-          gpsHeading != null && (speed >= 1.0 || !_compassAvailable);
+    final gpsHeading = _safeGpsHeading(position);
+    final bool useGpsHeading =
+        gpsHeading != null && (speed >= 1.0 || !_compassAvailable);
 
-      if (useGpsHeading) {
-        _heading = _smoothAngle(_heading, gpsHeading, factor: 0.85);
-        _headingNotifier.value = _heading;
-        _lastBearingGpsPosition = newPos;
-      } else if (!_compassAvailable) {
-        // Aparelhos sem magnetômetro: calcula direção pelo deslocamento ao caminhar
-        if (_lastBearingGpsPosition != null) {
-          final distMoved = const Distance().as(
-            LengthUnit.Meter,
+    if (useGpsHeading) {
+      _heading = _smoothAngle(_heading, gpsHeading, factor: 0.85);
+      _headingNotifier.value = _heading;
+      _lastBearingGpsPosition = newPos;
+    } else if (!_compassAvailable) {
+      // Aparelhos sem magnetômetro: calcula direção pelo deslocamento ao caminhar
+      if (_lastBearingGpsPosition != null) {
+        final distMoved = const Distance().as(
+          LengthUnit.Meter,
+          _lastBearingGpsPosition!,
+          newPos,
+        );
+        if (distMoved >= 1.5) {
+          final walkBearing = const Distance().bearing(
             _lastBearingGpsPosition!,
             newPos,
           );
-          if (distMoved >= 1.5) {
-            final walkBearing = const Distance().bearing(
-              _lastBearingGpsPosition!,
-              newPos,
-            );
-            _heading = _smoothAngle(_heading, walkBearing, factor: 0.85);
-            _headingNotifier.value = _heading;
-            _lastBearingGpsPosition = newPos;
-          }
-        } else {
+          _heading = _smoothAngle(_heading, walkBearing, factor: 0.85);
+          _headingNotifier.value = _heading;
           _lastBearingGpsPosition = newPos;
         }
-      }
-
-      // Animação contínua do marcador do veículo:
-      // Usamos forward(from: 0) que interrompe internamente qualquer animação
-      // anterior SEM chamar stop() antes — isso evita o frame de freeze que
-      // acontecia quando stop() zerava a posição antes do novo tween ser definido.
-      _vehicleLatLngTween = LatLngTween(begin: livePos, end: newPos);
-      _vehicleAnimController?.duration = _animationDuration;
-      _vehicleAnimController?.forward(from: 0.0);
-
-      if (_isFollowMode) {
-        final double targetZoom;
-        final LatLng targetCenter;
-
-        if (truckController.isNavigating) {
-          // Histerese de ~2 km/h: mantém a banda atual até a velocidade cruzar
-          // o limiar com margem, evitando o vai-e-vem de zoom (respiração).
-          if (_zoomBand == null) {
-            targetZoom = speed > 22 ? 15.5 : (speed > 13 ? 16.5 : 17.0);
-          } else if (_zoomBand == 17.0) {
-            targetZoom = speed > 15.0 ? 16.5 : 17.0;
-          } else if (_zoomBand == 15.5) {
-            targetZoom = speed < 15.0 ? 16.5 : 15.5;
-          } else {
-            targetZoom = speed > 22.0 ? 15.5 : (speed < 13.0 ? 17.0 : 16.5);
-          }
-          _zoomBand = targetZoom;
-
-          final double lookAheadMeters = (180 * math.pow(2, 17 - targetZoom))
-              .toDouble();
-          targetCenter = _projectPosition(newPos, _heading, lookAheadMeters);
-        } else {
-          double tempZoom = 16.5;
-          try {
-            tempZoom = _mapController.camera.zoom;
-          } catch (_) {}
-          targetZoom = tempZoom;
-          // Lookahead sutil para manter visão da rua à frente no sentido de deslocamento
-          final double lookAheadMeters = speed > 1.2 ? 35.0 : 0.0;
-          targetCenter = lookAheadMeters > 0
-              ? _projectPosition(newPos, _heading, lookAheadMeters)
-              : newPos;
-        }
-
-        _animateMapCamera(
-          targetCenter,
-          -_heading,
-          targetZoom,
-          customCurve: Curves.easeOutCubic,
-        );
       } else {
-        _latLngTween = null;
-        _rotationTween = null;
-        _zoomTween = null;
-        // Sem follow mode o usuário controla o mapa — não resetamos a câmera
-        // (o reset com tweens nulos só congelava o frame e criava a pausa).
-        _activeAnimation = null;
+        _lastBearingGpsPosition = newPos;
       }
-    });
+    }
+
+    // Animação contínua do marcador do veículo:
+    // Usamos forward(from: 0) que interrompe internamente qualquer animação
+    // anterior SEM chamar stop() antes — isso evita o frame de freeze que
+    // acontecia quando stop() zerava a posição antes do novo tween ser definido.
+    _vehicleLatLngTween = LatLngTween(begin: livePos, end: newPos);
+    _vehicleAnimController?.duration = _animationDuration;
+    _vehicleAnimController?.forward(from: 0.0);
+
+    if (_isFollowMode) {
+      final double targetZoom;
+      final LatLng targetCenter;
+
+      if (truckController.isNavigating) {
+        // Histerese de ~2 km/h: mantém a banda atual até a velocidade cruzar
+        // o limiar com margem, evitando o vai-e-vem de zoom (respiração).
+        if (_zoomBand == null) {
+          targetZoom = speed > 22 ? 15.5 : (speed > 13 ? 16.5 : 17.0);
+        } else if (_zoomBand == 17.0) {
+          targetZoom = speed > 15.0 ? 16.5 : 17.0;
+        } else if (_zoomBand == 15.5) {
+          targetZoom = speed < 15.0 ? 16.5 : 15.5;
+        } else {
+          targetZoom = speed > 22.0 ? 15.5 : (speed < 13.0 ? 17.0 : 16.5);
+        }
+        _zoomBand = targetZoom;
+
+        final double lookAheadMeters = (180 * math.pow(2, 17 - targetZoom))
+            .toDouble();
+        targetCenter = _projectPosition(newPos, _heading, lookAheadMeters);
+      } else {
+        double tempZoom = 16.5;
+        try {
+          tempZoom = _mapController.camera.zoom;
+        } catch (_) {}
+        targetZoom = tempZoom;
+        // Lookahead sutil para manter visão da rua à frente no sentido de deslocamento
+        final double lookAheadMeters = speed > 1.2 ? 35.0 : 0.0;
+        targetCenter = lookAheadMeters > 0
+            ? _projectPosition(newPos, _heading, lookAheadMeters)
+            : newPos;
+      }
+
+      _animateMapCamera(
+        targetCenter,
+        -_heading,
+        targetZoom,
+        customCurve: Curves.easeOutCubic,
+      );
+    } else {
+      _latLngTween = null;
+      _rotationTween = null;
+      _zoomTween = null;
+      // Sem follow mode o usuário controla o mapa — não resetamos a câmera
+      // (o reset com tweens nulos só congelava o frame e criava a pausa).
+      _activeAnimation = null;
+    }
   }
 
   Future<void> _triggerReroute(LatLng rawPos, TruckController tc) async {

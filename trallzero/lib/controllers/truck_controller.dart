@@ -105,6 +105,8 @@ class TruckController extends ChangeNotifier {
   bool _isFatigueAlertTriggered = false;
   DateTime? _fatigueStartedAt; // Timestamp do início da sessão de direção
   static const int _fatigueLimitSeconds = 5 * 3600 + 30 * 60; // 5h30m (Lei 13.103)
+  // Último severity notificado — evita rebuilds desnecessários a cada segundo
+  FatigueSeverity _lastFatigueSeverity = FatigueSeverity.none;
 
   double _distance = 0;
   double _duration = 0;
@@ -347,8 +349,18 @@ class TruckController extends ChangeNotifier {
         'Atenção motorista. Você atingiu o tempo limite de direção contínua estabelecido por lei. '
         'Por favor, procure um local seguro para descanso o mais rápido possível.',
       );
+      notifyListeners();
+      return;
     }
-    notifyListeners();
+
+    // Notifica apenas quando muda o nível de fadiga (mudança visual) ou a cada
+    // 60 s (para atualizar o HUD de tempo). Evita ~59 rebuilds/min desnecessários
+    // que bloqueavam a renderização do mapa a cada segundo.
+    final newSeverity = fatigueSeverity;
+    if (newSeverity != _lastFatigueSeverity || _drivingSeconds % 60 == 0) {
+      _lastFatigueSeverity = newSeverity;
+      notifyListeners();
+    }
   }
 
   /// Avança para o próximo step quando o motorista passa pela manobra
